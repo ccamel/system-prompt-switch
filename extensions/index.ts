@@ -1,0 +1,157 @@
+import type {
+	BeforeAgentStartEvent,
+	BeforeAgentStartEventResult,
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+	SessionStartEvent,
+} from "@earendil-works/pi-coding-agent";
+import { FsStorageAdapter } from "../src/adapters/fs-storage.adapter";
+import { PiUIAdapter } from "../src/adapters/pi-ui.adapter";
+import { SessionStateAdapter } from "../src/adapters/session-state.adapter";
+import { PromptService } from "../src/core/prompt-service";
+import type { MergeMode } from "../src/core/types";
+
+export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
+	const storage = new FsStorageAdapter();
+	const sessionState = new SessionStateAdapter();
+	const uiAdapter = new PiUIAdapter();
+	const service = new PromptService(storage, sessionState, uiAdapter);
+
+	// Wire session entry persistence into Pi session JSONL
+	sessionState.setAppendEntryFn((customType, data) => {
+		pi.appendEntry(customType, data);
+	});
+
+	function bindHost(ctx: ExtensionContext): string {
+		uiAdapter.setHost(ctx);
+		sessionState.setEntryProvider(ctx.sessionManager);
+		return ctx.sessionManager.getSessionId() || "default";
+	}
+
+	// --- Commands ---
+
+	pi.registerCommand("sps-select", {
+		description: "Select active system prompt for this session (or None / Default)",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			await service.selectPrompt(sessionId);
+		},
+	});
+
+	pi.registerCommand("sps-new", {
+		description: "Create a new system prompt markdown file and optionally activate it",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			await service.createNewPrompt(sessionId);
+		},
+	});
+
+	pi.registerCommand("sps-edit", {
+		description: "Edit a system prompt markdown file in Pi's editor",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			await service.editPrompt(sessionId);
+		},
+	});
+
+	pi.registerCommand("sps-delete", {
+		description: "Delete an existing system prompt file",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			await service.deletePrompt(sessionId);
+		},
+	});
+
+	pi.registerCommand("sps-mode", {
+		description: "Toggle or set injection mode (append | replace) for this session",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			const clean = args.trim().toLowerCase();
+			if (clean === "append" || clean === "replace") {
+				await service.toggleMode(sessionId, clean as MergeMode);
+			} else if (clean === "" || clean === "toggle") {
+				await service.toggleMode(sessionId);
+			} else {
+				ctx.ui.notify("Usage: /sps-mode [append|replace]", "error");
+			}
+		},
+	});
+
+	pi.registerCommand("sps-info", {
+		description: "Show current session prompt, mode, and session ID",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			const config = await service.getCurrentConfig(sessionId);
+			const files = await storage.list();
+
+			let activeSize = 0;
+			if (config.file) {
+				const content = await storage.read(config.file);
+				activeSize = content?.length ?? 0;
+			}
+
+			const lines = [
+				"--- System Prompt Switch ---",
+				`Session ID:  ${sessionId}`,
+				`Prompt File: ${config.file ?? "(None / Default)"}`,
+				`Mode:        ${config.mode}`,
+				`Enabled:     ${config.enabled}`,
+				`Prompt Size: ${activeSize} chars`,
+				`Directory:   ${storage.getDirectory()}`,
+				`Available:   ${files.length > 0 ? files.map((f) => f.name).join(", ") : "(none)"}`,
+			];
+
+			ctx.ui.notify(lines.join("\n"), "info");
+		},
+	});
+
+	// --- Lifecycle Hooks ---
+
+	pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
+		const sessionId = bindHost(ctx);
+		if (event.reason === "new") {
+			await service.promptNewSessionModal(sessionId);
+		} else {
+			await service.updateStatus(sessionId);
+		}
+	});
+
+	pi.on("session_shutdown", (_event, ctx: ExtensionContext) => {
+		if (ctx.hasUI) {
+			uiAdapter.setHost(ctx);
+			uiAdapter.setStatus(undefined);
+		}
+	});
+
+	// --- System Prompt Injection ---
+
+	pi.on(
+		"before_agent_start",
+		async (
+			event: BeforeAgentStartEvent,
+			ctx: ExtensionContext,
+		): Promise<BeforeAgentStartEventResult | void> => {
+			const sessionId = bindHost(ctx);
+			const opts = event.systemPromptOptions;
+
+			const resolvedPrompt = await service.resolvePromptForTurn(sessionId, {
+				basePrompt: event.systemPrompt,
+				tools: (opts?.toolSnippets as Record<string, string>) ?? {},
+				appendSystemPrompt: opts?.appendSystemPrompt,
+				contextFiles: opts?.contextFiles as Array<{ path: string; content: string }>,
+				skills: opts?.skills as Array<{
+					name: string;
+					description: string;
+					filePath: string;
+					disableModelInvocation?: boolean;
+				}>,
+				cwd: opts?.cwd ?? ctx.cwd,
+			});
+
+			if (resolvedPrompt !== event.systemPrompt) {
+				return { systemPrompt: resolvedPrompt };
+			}
+		},
+	);
+}
