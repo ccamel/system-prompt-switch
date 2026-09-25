@@ -9,8 +9,9 @@ import type {
 import { FsStorageAdapter } from "../src/adapters/fs-storage.adapter";
 import { PiUIAdapter } from "../src/adapters/pi-ui.adapter";
 import { SessionStateAdapter } from "../src/adapters/session-state.adapter";
+import { resolveHostPaths } from "../src/core/paths";
 import { PromptService } from "../src/core/prompt-service";
-import type { MergeMode } from "../src/core/types";
+import type { MergeMode } from "../src/core/types/merge-mode.type";
 
 export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 	const storage = new FsStorageAdapter();
@@ -25,6 +26,7 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 
 	function bindHost(ctx: ExtensionContext): string {
 		uiAdapter.setHost(ctx);
+		storage.setCwd(ctx.cwd);
 		sessionState.setEntryProvider(ctx.sessionManager);
 		return ctx.sessionManager.getSessionId() || "default";
 	}
@@ -38,9 +40,17 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 			await service.selectPrompt(sessionId);
 		},
 	});
+	pi.registerCommand("sps-inject", {
+		description: "Cumulatively inject/stack multiple system prompts for this session",
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			await service.injectPrompt(sessionId);
+		},
+	});
+
 
 	pi.registerCommand("sps-new", {
-		description: "Create a new system prompt markdown file and optionally activate it",
+		description: "Create a new system prompt markdown file (local or global)",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			await service.createNewPrompt(sessionId);
@@ -79,27 +89,41 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("sps-info", {
-		description: "Show current session prompt, mode, and session ID",
+		description: "Show current session prompt, mode, session ID, and directories",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			const config = await service.getCurrentConfig(sessionId);
 			const files = await storage.list();
+			const paths = resolveHostPaths(ctx.cwd);
+
+			const activeList =
+				config.activePrompts && config.activePrompts.length > 0
+					? config.activePrompts
+					: config.file
+						? [{ name: config.file, scope: config.scope ?? "global" }]
+						: [];
 
 			let activeSize = 0;
-			if (config.file) {
-				const content = await storage.read(config.file);
-				activeSize = content?.length ?? 0;
+			for (const p of activeList) {
+				const content = await storage.read(p.name, p.scope);
+				activeSize += content?.length ?? 0;
 			}
 
+			const promptFileLabel =
+				activeList.length > 0
+					? activeList.map((p) => `[${p.scope}] ${p.name}`).join(" + ")
+					: "(None / Default)";
 			const lines = [
 				"--- System Prompt Switch ---",
-				`Session ID:  ${sessionId}`,
-				`Prompt File: ${config.file ?? "(None / Default)"}`,
-				`Mode:        ${config.mode}`,
-				`Enabled:     ${config.enabled}`,
-				`Prompt Size: ${activeSize} chars`,
-				`Directory:   ${storage.getDirectory()}`,
-				`Available:   ${files.length > 0 ? files.map((f) => f.name).join(", ") : "(none)"}`,
+				`Host:             ${paths.host.toUpperCase()}`,
+				`Session ID:       ${sessionId}`,
+				`Prompt File:      ${promptFileLabel}`,
+				`Mode:             ${config.mode}`,
+				`Enabled:          ${config.enabled}`,
+				`Prompt Size:      ${activeSize} chars`,
+				`Global Directory: ${storage.getGlobalDirectory()}`,
+				`Local Directory:  ${storage.getLocalDirectory()}`,
+				`Available:        ${files.length > 0 ? files.map((f) => `[${f.scope}] ${f.name}`).join(", ") : "(none)"}`,
 			];
 
 			ctx.ui.notify(lines.join("\n"), "info");
@@ -110,7 +134,7 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
 		const sessionId = bindHost(ctx);
-		if (event.reason === "new") {
+		if (event.reason === "new" || event.reason === "startup") {
 			await service.promptNewSessionModal(sessionId);
 		} else {
 			await service.updateStatus(sessionId);
@@ -121,6 +145,7 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 		if (ctx.hasUI) {
 			uiAdapter.setHost(ctx);
 			uiAdapter.setStatus(undefined);
+			uiAdapter.setWidget(undefined);
 		}
 	});
 

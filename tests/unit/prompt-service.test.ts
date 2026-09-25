@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { NONE_OPTION, PromptService } from "../../src/core/prompt-service";
-import type { PromptFileInfo, SessionPromptConfig } from "../../src/core/types";
+import type { PromptFileInfo } from "../../src/core/types/prompt-file-info.type";
+import type { PromptScope } from "../../src/core/types/prompt-scope.type";
+import type { SessionPromptConfig } from "../../src/core/types/session-prompt-config.type";
 import type { SessionStatePort } from "../../src/ports/session-state.port";
 import type { StoragePort } from "../../src/ports/storage.port";
 import type { UIPort } from "../../src/ports/ui.port";
@@ -12,26 +14,33 @@ class MockStorage implements StoragePort {
 		return Array.from(this.files.entries()).map(([name, content]) => ({
 			name,
 			path: `/prompts/${name}`,
+			scope: "global" as PromptScope,
 			sizeChars: content.length,
 			modifiedAt: 1000,
 		}));
 	}
 
-	async read(name: string): Promise<string | null> {
+	async read(name: string, _scope?: PromptScope): Promise<string | null> {
 		return this.files.get(name) ?? null;
 	}
 
-	async write(name: string, content: string): Promise<void> {
+	async write(name: string, content: string, _scope?: PromptScope): Promise<void> {
 		this.files.set(name, content);
 	}
 
-	async delete(name: string): Promise<boolean> {
+	async delete(name: string, _scope?: PromptScope): Promise<boolean> {
 		return this.files.delete(name);
 	}
 
-	getDirectory(): string {
-		return "/prompts";
+	getGlobalDirectory(): string {
+		return "/prompts/global";
 	}
+
+	getLocalDirectory(): string {
+		return "/prompts/local";
+	}
+
+	setCwd(_cwd: string): void {}
 }
 
 class MockSessionState implements SessionStatePort {
@@ -51,19 +60,20 @@ class MockSessionState implements SessionStatePort {
 
 class MockUI implements UIPort {
 	selectChoice: string | undefined;
+	selectChoices: string[] = [];
 	inputValue: string | undefined;
 	editorValue: string | undefined;
 	confirmValue = true;
 	notifications: Array<{ message: string; type?: string }> = [];
 	currentStatus: string | undefined;
+	currentWidget: string[] | undefined;
 	hasUIValue = true;
 
 	hasUI(): boolean {
 		return this.hasUIValue;
 	}
-
 	async select(): Promise<string | undefined> {
-		return this.selectChoice;
+		return this.selectChoices.shift() ?? this.selectChoice;
 	}
 
 	async input(): Promise<string | undefined> {
@@ -84,6 +94,10 @@ class MockUI implements UIPort {
 
 	setStatus(text: string | undefined): void {
 		this.currentStatus = text;
+	}
+
+	setWidget(content: string[] | undefined): void {
+		this.currentWidget = content;
 	}
 }
 
@@ -120,26 +134,29 @@ describe("PromptService", () => {
 
 		const updated = await service.getCurrentConfig("sess-1");
 		expect(updated.file).toBeNull();
-		expect(ui.currentStatus).toBe("sps: none");
+		expect(ui.currentStatus).toBe("🎯 sps: none");
 	});
 
 	it("selects a file when chosen in selectPrompt", async () => {
 		storage.files.set("reviewer.md", "You are a reviewer.");
-		ui.selectChoice = "reviewer.md";
+		ui.selectChoice = "[global] reviewer.md";
 
 		const result = await service.selectPrompt("sess-1");
 		expect(result).toBe("reviewer.md");
 
 		const updated = await service.getCurrentConfig("sess-1");
 		expect(updated.file).toBe("reviewer.md");
-		expect(ui.currentStatus).toBe("sps: reviewer.md [append]");
+		expect(ui.currentStatus).toBe("🎯 sps: [global] reviewer.md [append]");
 	});
 
 	it("creates a new prompt and can activate it for session", async () => {
 		ui.inputValue = "security-auditor";
+		ui.selectChoices = [
+			"[global] User home (~/.omp or ~/.pi)",
+			"1. OMP / Pi built-in editor",
+		];
 		ui.editorValue = "Audit for vulnerabilities.";
 		ui.confirmValue = true; // activate for session
-
 		const result = await service.createNewPrompt("sess-1");
 		expect(result).toBe("security-auditor.md");
 		expect(storage.files.get("security-auditor.md")).toBe(
@@ -157,6 +174,7 @@ describe("PromptService", () => {
 			mode: "append",
 			enabled: true,
 		});
+		ui.selectChoices = ["1. OMP / Pi built-in editor"];
 		ui.editorValue = "Updated content";
 
 		const success = await service.editPrompt("sess-1");
@@ -171,7 +189,7 @@ describe("PromptService", () => {
 			mode: "append",
 			enabled: true,
 		});
-		ui.selectChoice = "temp.md";
+		ui.selectChoice = "[global] temp.md";
 		ui.confirmValue = true;
 
 		const success = await service.deletePrompt("sess-1");
@@ -180,7 +198,7 @@ describe("PromptService", () => {
 
 		const updated = await service.getCurrentConfig("sess-1");
 		expect(updated.file).toBeNull();
-		expect(ui.currentStatus).toBe("sps: none");
+		expect(ui.currentStatus).toBe("🎯 sps: none");
 	});
 
 	it("toggles mode between append and replace", async () => {
@@ -206,7 +224,35 @@ describe("PromptService", () => {
 			basePrompt: "Base prompt",
 		});
 		expect(result).toBe(
-			"Base prompt\n\n---\n\n## Custom system prompt\n\nSpeak like a pirate captain.",
+			"Base prompt\n\n---\n\n## Custom system prompt\n\n### [global] pirate.md\n\nSpeak like a pirate captain.",
 		);
+	});
+
+	it("cumulatively injects multiple prompts", async () => {
+		storage.files.set("prompt1.md", "Prompt 1 content");
+		storage.files.set("prompt2.md", "Prompt 2 content");
+
+		// Inject first prompt
+		ui.selectChoices = ["[global] prompt1.md"];
+		await service.injectPrompt("sess-1");
+
+		let config = await service.getCurrentConfig("sess-1");
+		expect(config.activePrompts.length).toBe(1);
+
+		// Inject second prompt
+		ui.selectChoices = ["[global] prompt2.md"];
+		await service.injectPrompt("sess-1");
+
+		config = await service.getCurrentConfig("sess-1");
+		expect(config.activePrompts.length).toBe(2);
+		expect(ui.currentStatus).toContain("[global] prompt1.md + [global] prompt2.md");
+		expect(ui.currentWidget?.[0]).toContain("Active Prompt: [global] prompt1.md + [global] prompt2.md");
+
+		// Resolves turn with both prompts combined
+		const result = await service.resolvePromptForTurn("sess-1", {
+			basePrompt: "Base instructions",
+		});
+		expect(result).toContain("Prompt 1 content");
+		expect(result).toContain("Prompt 2 content");
 	});
 });

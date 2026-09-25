@@ -5,5 +5,6 @@ export interface UIPort {
 	confirm(title: string, message: string): Promise<boolean>;
 	notify(message: string, type?: "info" | "warning" | "error"): void;
 	setStatus(text: string | undefined): void;
+	setWidget(content: string[] | undefined): void;
 	hasUI(): boolean;
 }

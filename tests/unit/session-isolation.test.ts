@@ -25,6 +25,7 @@ class DummyUI implements UIPort {
 	}
 	notify(): void {}
 	setStatus(): void {}
+	setWidget(): void {}
 }
 
 describe("Session Isolation", () => {
@@ -59,7 +60,7 @@ describe("Session Isolation", () => {
 	});
 
 	it("preserves separate prompt configs across different sessions", async () => {
-		const storage = new FsStorageAdapter(promptsDir);
+		const storage = new FsStorageAdapter({ globalDir: promptsDir });
 		const sessionState = new SessionStateAdapter(statePath);
 		const ui = new DummyUI();
 		const service = new PromptService(storage, sessionState, ui);
@@ -120,7 +121,7 @@ describe("Session Isolation", () => {
 
 		// Second run (simulating stopping and reopening session 1):
 		{
-			const freshStorage = new FsStorageAdapter(promptsDir);
+			const freshStorage = new FsStorageAdapter({ globalDir: promptsDir });
 			const freshSessionState = new SessionStateAdapter(statePath);
 			const freshService = new PromptService(
 				freshStorage,

@@ -44,8 +44,9 @@ echo ""
 echo "--- Pi Extension Commands ---"
 cat << 'EOF'
   • /sps-select : Pick active prompt for the current session (or None / Default)
-  • /sps-new    : Create a new system prompt markdown file
-  • /sps-edit   : Edit an existing system prompt in Pi's editor
+  • /sps-inject : Cumulatively stack/inject multiple system prompts
+  • /sps-new    : Create a new system prompt markdown file (local or global)
+  • /sps-edit   : Edit an existing system prompt (internal, VS Code, or $EDITOR)
   • /sps-delete : Delete an existing prompt file
   • /sps-mode   : Toggle or set prompt injection mode (append | replace)
   • /sps-info   : Display current session prompt, mode, and session ID

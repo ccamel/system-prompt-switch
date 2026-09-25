@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SessionPromptConfig } from "../core/types";
+import { resolveHostPaths } from "../core/paths";
+import type { SessionPromptConfig } from "../core/types/session-prompt-config.type";
 import type { SessionStatePort } from "../ports/session-state.port";
 
 export interface SessionEntryProvider {
@@ -18,19 +19,7 @@ export class SessionStateAdapter implements SessionStatePort {
 	private entryProvider: SessionEntryProvider | null = null;
 
 	constructor(customStatePath?: string) {
-		const envPath = process.env.PI_SYSTEM_PROMPT_STATE_PATH?.trim();
-		this.stateFilePath =
-			customStatePath ??
-			(envPath && envPath.length > 0
-				? envPath
-				: path.join(
-						os.homedir(),
-						".pi",
-						"agent",
-						"state",
-						"system-prompt-switch",
-						"sessions.json",
-					));
+		this.stateFilePath = customStatePath ?? resolveHostPaths().statePath;
 	}
 
 	setAppendEntryFn(fn: AppendEntryFn): void {

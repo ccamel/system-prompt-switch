@@ -1,4 +1,5 @@
-import type { BuildPromptInput, SkillItem } from "./types";
+import type { BuildPromptInput } from "./types/build-prompt-input.type";
+import type { SkillItem } from "./types/skill-item.type";
 
 export function escapeXml(str: string): string {
 	return str
@@ -31,13 +32,30 @@ export function formatSkillsBlock(skills: SkillItem[]): string {
 }
 
 export function buildSystemPrompt(input: BuildPromptInput): string {
-	const custom = input.customPrompt?.trim();
-	if (!custom) {
+	const chunks: string[] = [];
+
+	if (input.customPrompts && input.customPrompts.length > 0) {
+		for (const chunk of input.customPrompts) {
+			const trimmed = chunk.content.trim();
+			if (trimmed.length > 0) {
+				const header = chunk.name
+					? `### [${chunk.scope ?? "global"}] ${chunk.name}\n\n`
+					: "";
+				chunks.push(`${header}${trimmed}`);
+			}
+		}
+	} else if (input.customPrompt && input.customPrompt.trim().length > 0) {
+		chunks.push(input.customPrompt.trim());
+	}
+
+	if (chunks.length === 0) {
 		return input.basePrompt;
 	}
 
+	const assembledCustom = chunks.join("\n\n---\n\n");
+
 	if (input.mode === "append") {
-		return `${input.basePrompt}\n\n---\n\n## Custom system prompt\n\n${custom}`;
+		return `${input.basePrompt}\n\n---\n\n## Custom system prompt\n\n${assembledCustom}`;
 	}
 
 	// replace mode
@@ -76,7 +94,7 @@ export function buildSystemPrompt(input: BuildPromptInput): string {
 	const cwd = input.cwd ?? "unknown";
 
 	return (
-		custom +
+		assembledCustom +
 		toolsSection +
 		appendSection +
 		contextSection +

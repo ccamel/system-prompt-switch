@@ -17,8 +17,8 @@ describe("Extension Lifecycle E2E", () => {
 
 		fs.mkdirSync(promptsDir, { recursive: true });
 		fs.mkdirSync(stateDir, { recursive: true });
-		process.env.PI_SYSTEM_PROMPT_DIR = promptsDir;
-		process.env.PI_SYSTEM_PROMPT_STATE_PATH = path.join(stateDir, "sessions.json");
+		process.env.SPS_PROMPT_DIR = promptsDir;
+		process.env.SPS_STATE_PATH = path.join(stateDir, "sessions.json");
 
 		fs.writeFileSync(
 			path.join(promptsDir, "test-prompt.md"),
@@ -28,8 +28,8 @@ describe("Extension Lifecycle E2E", () => {
 	});
 
 	afterEach(() => {
-		delete process.env.PI_SYSTEM_PROMPT_DIR;
-		delete process.env.PI_SYSTEM_PROMPT_STATE_PATH;
+		delete process.env.SPS_PROMPT_DIR;
+		delete process.env.SPS_STATE_PATH;
 		try {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		} catch {
@@ -62,6 +62,7 @@ describe("Extension Lifecycle E2E", () => {
 
 		// Assert all required commands are registered
 		expect(registeredCommands.has("sps-select")).toBe(true);
+		expect(registeredCommands.has("sps-inject")).toBe(true);
 		expect(registeredCommands.has("sps-new")).toBe(true);
 		expect(registeredCommands.has("sps-edit")).toBe(true);
 		expect(registeredCommands.has("sps-delete")).toBe(true);
@@ -86,7 +87,7 @@ describe("Extension Lifecycle E2E", () => {
 			ui: {
 				select: async (_title: string, _options: string[]) => {
 					selectTriggered = true;
-					return "test-prompt.md";
+					return "[global] test-prompt.md";
 				},
 				notify: () => {},
 				setStatus: (_key: string, text: string | undefined) => {
@@ -102,7 +103,7 @@ describe("Extension Lifecycle E2E", () => {
 		}
 
 		expect(selectTriggered).toBe(true);
-		expect(currentStatus).toBe("sps: test-prompt.md [append]");
+		expect(currentStatus).toBe("🎯 sps: [global] test-prompt.md [append]");
 
 		// 2. Trigger before_agent_start
 		const beforeAgentHandlers = eventHandlers.get("before_agent_start")!;
