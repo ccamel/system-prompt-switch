@@ -83,6 +83,7 @@ class MockUI implements UIPort {
 	selectChoice: string | undefined;
 	selectChoices: string[] = [];
 	inputValue: string | undefined;
+	inputValues: string[] = [];
 	editorValue: string | undefined;
 	confirmValue = true;
 	notifications: Array<{ message: string; type?: string }> = [];
@@ -98,6 +99,9 @@ class MockUI implements UIPort {
 	}
 
 	async input(): Promise<string | undefined> {
+		if (this.inputValues.length > 0) {
+			return this.inputValues.shift();
+		}
 		return this.inputValue;
 	}
 
@@ -236,6 +240,11 @@ describe("PromptService", () => {
 		expect(bannerWidget).toBeDefined();
 		expect(bannerWidget?.some((line) => line.includes("Ctrl+Q"))).toBe(true);
 		expect(bannerWidget?.some((line) => line.includes("Esc"))).toBe(true);
+
+		// ponytail: regression guard — every banner line must be the same
+		// character width so the box-drawing corners align in the terminal.
+		const widths = (bannerWidget ?? []).map((line) => [...line].length);
+		expect(new Set(widths).size).toBe(1);
 
 		const finalWidget = ui.widgetHistory[ui.widgetHistory.length - 1];
 		expect(finalWidget?.[0]).toContain("Active Prompt");
@@ -541,6 +550,62 @@ describe("PromptService", () => {
 		expect(result).toBeNull();
 		const lastNotification = ui.notifications[ui.notifications.length - 1];
 		expect(lastNotification.message).toContain("already exists in global scope");
+	});
+
+	it("accepts a hyphenated name and auto-appends .md", async () => {
+		ui.inputValue = "Backend-Dev";
+		ui.selectChoices = ["1. Built-in terminal editor"];
+		ui.editorValue = "body";
+
+		const result = await service.createNewPrompt("sess-name-1", "global");
+		expect(result).toBe("Backend-Dev.md");
+		expect(storage.globalFiles.get("Backend-Dev.md")).toBe("body");
+	});
+
+	it("rejects a name containing whitespace, then accepts a valid retry", async () => {
+		ui.inputValues = ["Test test", "Backend-Dev"];
+		ui.selectChoices = ["1. Built-in terminal editor"];
+		ui.editorValue = "body";
+
+		const result = await service.createNewPrompt("sess-name-1b", "global");
+		expect(result).toBe("Backend-Dev.md");
+		expect(storage.globalFiles.get("Backend-Dev.md")).toBe("body");
+		expect(storage.globalFiles.has("Test test.md")).toBe(false);
+
+		const errorNotice = ui.notifications.find((n) =>
+			n.message.toLowerCase().includes("whitespace"),
+		);
+		expect(errorNotice).toBeDefined();
+	});
+
+	it("rejects a name containing a slash, then accepts a valid retry", async () => {
+		ui.inputValues = ["foo/bar", "ok-name"];
+		ui.selectChoices = ["1. Built-in terminal editor"];
+		ui.editorValue = "body";
+
+		const result = await service.createNewPrompt("sess-name-2", "global");
+		expect(result).toBe("ok-name.md");
+		expect(storage.globalFiles.get("ok-name.md")).toBe("body");
+
+		const errorNotice = ui.notifications.find((n) =>
+			n.message.toLowerCase().includes("invalid"),
+		);
+		expect(errorNotice).toBeDefined();
+	});
+
+	it("rejects an empty name, then accepts a valid retry", async () => {
+		ui.inputValues = ["   ", "valid"];
+		ui.selectChoices = ["1. Built-in terminal editor"];
+		ui.editorValue = "body";
+
+		const result = await service.createNewPrompt("sess-name-3", "global");
+		expect(result).toBe("valid.md");
+		expect(storage.globalFiles.get("valid.md")).toBe("body");
+
+		const errorNotice = ui.notifications.find((n) =>
+			n.message.toLowerCase().includes("empty"),
+		);
+		expect(errorNotice).toBeDefined();
 	});
 
 	it("returns formatted paths summary including active prompt and directories", async () => {

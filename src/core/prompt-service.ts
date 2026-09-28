@@ -20,11 +20,14 @@ export const CREATE_NEW_LOCAL_OPTION = "+ Create new [local] prompt (.agents/...
 
 // ponytail: the host's editor footer advertises Ctrl+Enter submit + Ctrl+G external editor,
 // which we cannot suppress from extension code. Show our own banner above the editor instead.
+// ponytail: emojis count as 2 cells in terminals but the box-drawing corners count as 1,
+// breaking right-edge alignment; we use plain text markers and equalize char counts so
+// every line is exactly 37 chars wide (╭─ X ─╮ style; 4 lines, same width).
 const EDITOR_SHORTCUT_BANNER: string[] = [
-	"╭─ 💡 Editor shortcuts ─╮",
-	"│ Submit: Ctrl+Q       │",
-	"│ Cancel: Esc          │",
-	"╰─ Ctrl+Enter / Ctrl+G are not supported ─╯",
+    "╭─ Editor shortcuts ────────────────╮",
+	"│ Submit: Ctrl+Q                    │",
+	"│ Cancel: Esc                       │",
+	"╰─ Ctrl+Enter / Ctrl+G ignored ─────╯",
 ];
 
 export interface ResolvedSessionPromptConfig extends SessionPromptConfig {
@@ -300,21 +303,62 @@ export class PromptService {
 		}
 	}
 
+	private async promptForPromptName(): Promise<string | null> {
+		while (true) {
+			const rawName = await this.ui.input(
+				"Enter prompt file name (e.g. backend-dev.md):",
+			);
+			if (rawName === undefined) {
+				this.ui.notify("Prompt creation cancelled.", "info");
+				return null;
+			}
+			const trimmed = rawName.trim();
+			if (trimmed.length === 0) {
+				this.ui.notify(
+					"Invalid prompt name: cannot be empty.",
+					"warning",
+				);
+				continue;
+			}
+			if (trimmed.startsWith(".")) {
+				this.ui.notify(
+					`Invalid prompt name "${trimmed}": cannot start with a dot (would create a hidden file).`,
+					"warning",
+				);
+				continue;
+			}
+			if (
+				// eslint-disable-next-line no-control-regex -- intentional NUL guard
+				/[\s/\\\u0000]/.test(trimmed)
+			) {
+				this.ui.notify(
+					`Invalid prompt name "${trimmed}": cannot contain whitespace, /, \\, or NUL. Use letters, digits, dashes, underscores, dots.`,
+					"warning",
+				);
+				continue;
+			}
+			// ponytail: path.basename guards against relative-path tricks like
+			// "..", "../foo", "a/b"; anything that survives is filename-safe.
+			const basename = path.basename(trimmed);
+			if (basename !== trimmed) {
+				this.ui.notify(
+					`Invalid prompt name "${trimmed}": resolves to "${basename}", which is not what you typed.`,
+					"warning",
+				);
+				continue;
+			}
+			return trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
+		}
+	}
+
 	async createNewPrompt(
 		sessionId?: string,
 		preselectedScope?: PromptScope,
 	): Promise<string | null> {
-		const rawName = await this.ui.input(
-			"Enter prompt file name (e.g. backend-dev.md):",
-		);
-		if (!rawName || !rawName.trim()) {
-			this.ui.notify("Prompt creation cancelled.", "info");
+		const cleanName = await this.promptForPromptName();
+		if (cleanName === null) {
 			return null;
 		}
-
-		const cleanName = rawName.trim().endsWith(".md")
-			? rawName.trim()
-			: `${rawName.trim()}.md`;
 
 		// Determine target scope
 		let targetScope: PromptScope = preselectedScope ?? "global";
