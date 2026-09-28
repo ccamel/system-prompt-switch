@@ -18,6 +18,15 @@ export const CREATE_NEW_OPTION = "+ Create new prompt...";
 export const CREATE_NEW_GLOBAL_OPTION = "+ Create new [global] prompt (~/.omp or ~/.pi)";
 export const CREATE_NEW_LOCAL_OPTION = "+ Create new [local] prompt (.agents/...)";
 
+// ponytail: the host's editor footer advertises Ctrl+Enter submit + Ctrl+G external editor,
+// which we cannot suppress from extension code. Show our own banner above the editor instead.
+const EDITOR_SHORTCUT_BANNER: string[] = [
+	"╭─ 💡 Editor shortcuts ─╮",
+	"│ Submit: Ctrl+Q       │",
+	"│ Cancel: Esc          │",
+	"╰─ Ctrl+Enter / Ctrl+G are not supported ─╯",
+];
+
 export interface ResolvedSessionPromptConfig extends SessionPromptConfig {
 	activePrompts: ActivePromptRef[];
 }
@@ -74,6 +83,23 @@ export class PromptService {
 		this.ui.setWidget([
 			`╭─ 🎯 Active Prompt: ${label} (${config.mode} mode) ─╮`,
 		]);
+	}
+
+	private async runEditorWithHint(
+		title: string,
+		prefill: string,
+		sessionId?: string,
+	): Promise<string | undefined> {
+		this.ui.setWidget(EDITOR_SHORTCUT_BANNER);
+		try {
+			return await this.ui.editor(title, prefill);
+		} finally {
+			if (sessionId) {
+				await this.updateStatus(sessionId);
+			} else {
+				this.ui.setWidget(undefined);
+			}
+		}
 	}
 
 
@@ -298,9 +324,10 @@ export class PromptService {
 		const initialStub = `# ${cleanName.replace(/\.md$/, "")}\n\n`;
 
 		// Open native editor directly with clean title
-		const updated = await this.ui.editor(
+		const updated = await this.runEditorWithHint(
 			`Create: [${targetScope}] ${cleanName}`,
 			initialStub,
+			sessionId,
 		);
 		if (updated === undefined || updated.trim().length === 0) {
 			this.ui.notify("Prompt creation cancelled (empty or cancelled).", "info");
@@ -372,9 +399,10 @@ export class PromptService {
 		}
 
 		// Open native editor directly with clean title
-		const updated = await this.ui.editor(
+		const updated = await this.runEditorWithHint(
 			`Edit: ${targetFile}`,
 			content,
+			sessionId,
 		);
 		if (updated === undefined) {
 			this.ui.notify("Edit cancelled.", "info");

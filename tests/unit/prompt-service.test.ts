@@ -87,6 +87,7 @@ class MockUI implements UIPort {
 	confirmValue = true;
 	notifications: Array<{ message: string; type?: string }> = [];
 	currentWidget: string[] | undefined;
+	widgetHistory: Array<string[] | undefined> = [];
 	hasUIValue = true;
 
 	hasUI(): boolean {
@@ -115,6 +116,7 @@ class MockUI implements UIPort {
 
 	setWidget(content: string[] | undefined): void {
 		this.currentWidget = content;
+		this.widgetHistory.push(content);
 	}
 }
 
@@ -180,6 +182,25 @@ describe("PromptService", () => {
 		expect(updated.file).toBe("security-auditor.md");
 	});
 
+	it("shows the editor-shortcut banner widget while creating a prompt, then restores status", async () => {
+		ui.inputValue = "auditor.md";
+		ui.editorValue = "Audit body.";
+
+		const beforeHistoryLength = ui.widgetHistory.length;
+		await service.createNewPrompt("sess-1");
+
+		const bannerWidget = ui.widgetHistory
+			.slice(beforeHistoryLength)
+			.find((w) => w?.some((line) => line.includes("Editor shortcuts")));
+
+		expect(bannerWidget).toBeDefined();
+		expect(bannerWidget?.some((line) => line.includes("Ctrl+Q"))).toBe(true);
+		expect(bannerWidget?.some((line) => line.includes("Esc"))).toBe(true);
+
+		const finalWidget = ui.widgetHistory[ui.widgetHistory.length - 1];
+		expect(finalWidget?.[0]).toContain("Active Prompt");
+	});
+
 	it("edits an existing prompt", async () => {
 		storage.files.set("dev.md", "Original content");
 		await sessionState.setSessionConfig("sess-1", {
@@ -193,6 +214,31 @@ describe("PromptService", () => {
 		const success = await service.editPrompt("sess-1");
 		expect(success).toBe(true);
 		expect(storage.files.get("dev.md")).toBe("Updated content");
+	});
+
+	it("shows the editor-shortcut banner widget while editing a prompt, then restores status", async () => {
+		storage.files.set("dev.md", "Original content");
+		await sessionState.setSessionConfig("sess-1", {
+			file: "dev.md",
+			mode: "append",
+			enabled: true,
+		});
+		ui.selectChoices = [];
+		ui.editorValue = "Updated content";
+
+		const beforeHistoryLength = ui.widgetHistory.length;
+		await service.editPrompt("sess-1");
+
+		const bannerWidget = ui.widgetHistory
+			.slice(beforeHistoryLength)
+			.find((w) => w?.some((line) => line.includes("Editor shortcuts")));
+
+		expect(bannerWidget).toBeDefined();
+		expect(bannerWidget?.some((line) => line.includes("Ctrl+Q"))).toBe(true);
+		expect(bannerWidget?.some((line) => line.includes("Esc"))).toBe(true);
+
+		const finalWidget = ui.widgetHistory[ui.widgetHistory.length - 1];
+		expect(finalWidget?.[0]).toContain("Active Prompt");
 	});
 
 	it("deletes a prompt and resets current session if it was active", async () => {
