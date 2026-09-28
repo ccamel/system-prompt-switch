@@ -141,6 +141,8 @@ pi install npm:system-prompt-switch
 pi
 ```
 
+Note: `omp plugin upgrade` is **only for marketplace** plugins (`name@marketplace`). For npm-installed plugins like ours, omp's own help message confirms: "For an npm-installed plugin, upgrade with: `omp plugin install <name> --force`". So `--force` on install IS the official update path.
+
 In a fresh session, type `/sps` and confirm all 9 commands appear in the autocompletion. Run `/sps-info` to see the host, active prompts, mode, session ID.
 
 ## Common failure modes

@@ -36,17 +36,25 @@ Editor banner while creating a new prompt (Ctrl+Q submit, Esc cancel):
 
 Demo GIFs:
 
-**1. Pick a prompt at startup**
+**1. Select / Create system prompt when new session**
 
-![Demo: pick a prompt at startup](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/demo-1-welcome.gif)
+![Select or create a system prompt for a new session](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/select-create-sys-prompt.gif)
 
-**2. Active prompt banner + editor shortcuts (Ctrl+Q submit, Esc cancel)**
+**2. Update system prompt (local or global)**
 
-![Demo: active banner + shortcuts](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/demo-2-editor.gif)
+![Update an existing system prompt](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/update-created-sys-prompt.gif)
 
-**3. `/sps-inject` — stack multiple prompts for one session**
+**3. Inject one or several system prompts for next message**
 
-![Demo: /sps-inject](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/demo-3-inject.gif)
+![Cumulative inject for the next message](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/inject-prompts.gif)
+
+**4. Get information or logs**
+
+![Get current session prompt info](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/get-info.gif)
+
+**5. Delete a system prompt**
+
+![Delete a system prompt with confirmation](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/delete-sys-prompt.gif)
 
 ---
 
