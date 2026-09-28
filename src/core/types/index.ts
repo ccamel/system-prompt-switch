@@ -11,3 +11,8 @@ export type {
 	BuildPromptInput,
 	CustomPromptChunk,
 } from "./build-prompt-input.type";
+export {
+	ExtensionCommand,
+	EXTENSION_COMMAND_CATALOG,
+} from "./extension-command.type";
+export type { ExtensionCommandMetadata } from "./extension-command.type";

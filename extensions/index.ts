@@ -11,6 +11,11 @@ import { PiUIAdapter } from "../src/adapters/pi-ui.adapter";
 import { SessionStateAdapter } from "../src/adapters/session-state.adapter";
 import { resolveHostPaths } from "../src/core/paths";
 import { PromptService } from "../src/core/prompt-service";
+import { logger } from "../src/core/logger";
+import {
+	ExtensionCommand,
+	EXTENSION_COMMAND_CATALOG,
+} from "../src/core/types/extension-command.type";
 import type { MergeMode } from "../src/core/types/merge-mode.type";
 
 export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
@@ -33,15 +38,16 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 
 	// --- Commands ---
 
-	pi.registerCommand("sps-select", {
-		description: "Select active system prompt for this session (or None / Default)",
+	pi.registerCommand(ExtensionCommand.SELECT, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.SELECT].description,
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			await service.selectPrompt(sessionId);
 		},
 	});
-	pi.registerCommand("sps-inject", {
-		description: "Cumulatively inject/stack multiple system prompts for this session",
+
+	pi.registerCommand(ExtensionCommand.INJECT, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.INJECT].description,
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			await service.injectPrompt(sessionId);
@@ -49,32 +55,32 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 	});
 
 
-	pi.registerCommand("sps-new", {
-		description: "Create a new system prompt markdown file (local or global)",
+	pi.registerCommand(ExtensionCommand.NEW, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.NEW].description,
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			await service.createNewPrompt(sessionId);
 		},
 	});
 
-	pi.registerCommand("sps-edit", {
-		description: "Edit a system prompt markdown file in Pi's editor",
+	pi.registerCommand(ExtensionCommand.EDIT, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.EDIT].description,
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			await service.editPrompt(sessionId);
 		},
 	});
 
-	pi.registerCommand("sps-delete", {
-		description: "Delete an existing system prompt file",
+	pi.registerCommand(ExtensionCommand.DELETE, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.DELETE].description,
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			await service.deletePrompt(sessionId);
 		},
 	});
 
-	pi.registerCommand("sps-mode", {
-		description: "Toggle or set injection mode (append | replace) for this session",
+	pi.registerCommand(ExtensionCommand.MODE, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.MODE].description,
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			const clean = args.trim().toLowerCase();
@@ -83,13 +89,16 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 			} else if (clean === "" || clean === "toggle") {
 				await service.toggleMode(sessionId);
 			} else {
-				ctx.ui.notify("Usage: /sps-mode [append|replace]", "error");
+				ctx.ui.notify(
+					`Usage: ${EXTENSION_COMMAND_CATALOG[ExtensionCommand.MODE].usage}`,
+					"error",
+				);
 			}
 		},
 	});
 
-	pi.registerCommand("sps-info", {
-		description: "Show current session prompt, mode, session ID, and directories",
+	pi.registerCommand(ExtensionCommand.INFO, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.INFO].description,
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const sessionId = bindHost(ctx);
 			const config = await service.getCurrentConfig(sessionId);
@@ -129,22 +138,52 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
 	});
+	pi.registerCommand(ExtensionCommand.PATH, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.PATH].description,
+		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+			const sessionId = bindHost(ctx);
+			const lines = await service.getPathsSummary(sessionId);
+			ctx.ui.notify(lines.join("\n"), "info");
+		},
+	});
+
+	pi.registerCommand(ExtensionCommand.LOGS, {
+		description: EXTENSION_COMMAND_CATALOG[ExtensionCommand.LOGS].description,
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
+			bindHost(ctx);
+			const lines = parseInt(args.trim(), 10) || 20;
+			const recent = logger.getRecent(lines);
+			const output = [
+				"=== System Prompt Switch Logs ===",
+				`Log file: ${logger.getLogPath()}`,
+				`Live tail: tail -f "${logger.getLogPath()}"`,
+				"---------------------------------",
+				...recent,
+			];
+			ctx.ui.notify(output.join("\n"), "info");
+		},
+	});
 
 	// --- Lifecycle Hooks ---
 
-	pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
+	pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
 		const sessionId = bindHost(ctx);
-		if (event.reason === "new" || event.reason === "startup") {
-			await service.promptNewSessionModal(sessionId);
+		logger.info("SESSION_START", "session_start event received", {
+			reason: event.reason,
+			sessionId,
+		});
+		if (!event.reason || event.reason === "new" || event.reason === "startup") {
+			// Detach modal from event watchdog so user dialogs have unlimited time
+			void service.promptNewSessionModal(sessionId);
 		} else {
-			await service.updateStatus(sessionId);
+			void service.updateStatus(sessionId);
 		}
 	});
 
 	pi.on("session_shutdown", (_event, ctx: ExtensionContext) => {
+		logger.info("SESSION_SHUTDOWN", "session_shutdown event received");
 		if (ctx.hasUI) {
 			uiAdapter.setHost(ctx);
-			uiAdapter.setStatus(undefined);
 			uiAdapter.setWidget(undefined);
 		}
 	});

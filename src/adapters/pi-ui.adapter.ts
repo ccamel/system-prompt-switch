@@ -8,7 +8,7 @@ export interface PiUIHost {
 		editor(title: string, prefill?: string): Promise<string | undefined>;
 		confirm(title: string, message: string): Promise<boolean>;
 		notify(message: string, type?: "info" | "warning" | "error"): void;
-		setStatus(key: string, text: string | undefined): void;
+
 		setWidget?(
 			key: string,
 			content: string[] | undefined,
@@ -19,7 +19,7 @@ export interface PiUIHost {
 
 export class PiUIAdapter implements UIPort {
 	private host: PiUIHost | null = null;
-	private readonly statusKey = "system-prompt-switch";
+	private readonly widgetKey = "system-prompt-switch";
 
 	setHost(host: PiUIHost | null): void {
 		this.host = host;
@@ -55,15 +55,11 @@ export class PiUIAdapter implements UIPort {
 		}
 	}
 
-	setStatus(text: string | undefined): void {
-		if (this.host?.hasUI) {
-			this.host.ui.setStatus(this.statusKey, text);
-		}
-	}
+
 
 	setWidget(content: string[] | undefined): void {
 		if (this.host?.hasUI && typeof this.host.ui.setWidget === "function") {
-			this.host.ui.setWidget(this.statusKey, content, {
+			this.host.ui.setWidget(this.widgetKey, content, {
 				placement: "aboveEditor",
 			});
 		}

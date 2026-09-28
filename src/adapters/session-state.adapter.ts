@@ -1,5 +1,4 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHostPaths } from "../core/paths";
 import type { SessionPromptConfig } from "../core/types/session-prompt-config.type";
@@ -7,7 +6,7 @@ import type { SessionStatePort } from "../ports/session-state.port";
 
 export interface SessionEntryProvider {
 	getSessionId?(): string;
-	getEntries?(): Array<{ customType?: string; data?: unknown }>;
+	getEntries?(): readonly unknown[];
 }
 
 export type AppendEntryFn = (customType: string, data?: unknown) => void;
@@ -64,7 +63,11 @@ export class SessionStateAdapter implements SessionStatePort {
 				for (let i = entries.length - 1; i >= 0; i--) {
 					const entry = entries[i];
 					if (
+						entry &&
+						typeof entry === "object" &&
+						"customType" in entry &&
 						entry.customType === "system-prompt-switch" &&
+						"data" in entry &&
 						entry.data &&
 						typeof entry.data === "object"
 					) {

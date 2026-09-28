@@ -45,16 +45,18 @@ echo "--- Pi Extension Commands ---"
 cat << 'EOF'
   • /sps-select : Pick active prompt for the current session (or None / Default)
   • /sps-inject : Cumulatively stack/inject multiple system prompts
-  • /sps-new    : Create a new system prompt markdown file (local or global)
-  • /sps-edit   : Edit an existing system prompt (internal, VS Code, or $EDITOR)
+  • /sps-new    : Create a new system prompt markdown file directly in OMP
+  • /sps-edit   : Edit an existing system prompt in OMP's built-in editor
+  • /sps-path   : Display absolute local and global file paths for system prompts
   • /sps-delete : Delete an existing prompt file
   • /sps-mode   : Toggle or set prompt injection mode (append | replace)
   • /sps-info   : Display current session prompt, mode, and session ID
+  • /sps-logs   : Display recent session logs and live tail command
 EOF
 echo ""
 
-echo "--- Available Skills (.skills/skills/) ---"
-SKILLS_DIR="${ROOT_DIR}/.skills/skills"
+echo "--- Available Skills (.agents/skills/) ---"
+SKILLS_DIR="${ROOT_DIR}/.agents/skills"
 if [ -d "${SKILLS_DIR}" ]; then
   for skill in "${SKILLS_DIR}"/*; do
     if [ -d "${skill}" ]; then

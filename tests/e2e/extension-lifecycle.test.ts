@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { ExtensionCommand } from "../../src/core/types/extension-command.type";
 import systemPromptSwitchExtension from "../../extensions/index";
 
 describe("Extension Lifecycle E2E", () => {
@@ -39,10 +40,10 @@ describe("Extension Lifecycle E2E", () => {
 
 	it("registers commands and handles lifecycle events", async () => {
 		const registeredCommands = new Map<string, unknown>();
+		const registeredShortcuts = new Map<string, unknown>();
 		type HandlerFn = (event: unknown, ctx: unknown) => unknown;
 		const eventHandlers = new Map<string, HandlerFn[]>();
 		const appendedEntries: Array<{ customType: string; data?: unknown }> = [];
-
 		const mockPi = {
 			registerCommand(name: string, options: unknown) {
 				registeredCommands.set(name, options);
@@ -55,20 +56,24 @@ describe("Extension Lifecycle E2E", () => {
 			appendEntry(customType: string, data?: unknown) {
 				appendedEntries.push({ customType, data });
 			},
+			registerShortcut(shortcut: string, options: unknown) {
+				registeredShortcuts.set(shortcut, options);
+			},
 		} as unknown as ExtensionAPI;
 
 		// Load extension
 		systemPromptSwitchExtension(mockPi);
 
 		// Assert all required commands are registered
-		expect(registeredCommands.has("sps-select")).toBe(true);
-		expect(registeredCommands.has("sps-inject")).toBe(true);
-		expect(registeredCommands.has("sps-new")).toBe(true);
-		expect(registeredCommands.has("sps-edit")).toBe(true);
-		expect(registeredCommands.has("sps-delete")).toBe(true);
-		expect(registeredCommands.has("sps-mode")).toBe(true);
-		expect(registeredCommands.has("sps-info")).toBe(true);
-
+		expect(registeredCommands.has(ExtensionCommand.SELECT)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.INJECT)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.NEW)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.EDIT)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.DELETE)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.MODE)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.INFO)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.PATH)).toBe(true);
+		expect(registeredCommands.has(ExtensionCommand.LOGS)).toBe(true);
 		// Assert event handlers registered
 		expect(eventHandlers.has("session_start")).toBe(true);
 		expect(eventHandlers.has("before_agent_start")).toBe(true);
@@ -76,7 +81,8 @@ describe("Extension Lifecycle E2E", () => {
 
 		// Mock context
 		let selectTriggered = false;
-		let currentStatus: string | undefined;
+		let currentWidget: string[] | undefined;
+		const { promise: selectDone, resolve: resolveSelect } = Promise.withResolvers<void>();
 		const mockCtx = {
 			hasUI: true,
 			cwd: tempDir,
@@ -90,8 +96,11 @@ describe("Extension Lifecycle E2E", () => {
 					return "[global] test-prompt.md";
 				},
 				notify: () => {},
-				setStatus: (_key: string, text: string | undefined) => {
-					currentStatus = text;
+				setWidget: (_key: string, content: string[] | undefined) => {
+					currentWidget = content;
+					if (content) {
+						resolveSelect();
+					}
 				},
 			},
 		} as unknown as ExtensionContext;
@@ -99,11 +108,12 @@ describe("Extension Lifecycle E2E", () => {
 		// 1. Trigger session_start (reason: "new")
 		const sessionStartHandlers = eventHandlers.get("session_start")!;
 		for (const h of sessionStartHandlers) {
-			await h({ type: "session_start", reason: "new" }, mockCtx);
+			await h({ type: "session_start" }, mockCtx);
 		}
+		await selectDone;
 
 		expect(selectTriggered).toBe(true);
-		expect(currentStatus).toBe("🎯 sps: [global] test-prompt.md [append]");
+		expect(currentWidget?.[0]).toContain("[global] test-prompt.md (append mode)");
 
 		// 2. Trigger before_agent_start
 		const beforeAgentHandlers = eventHandlers.get("before_agent_start")!;
@@ -129,6 +139,6 @@ describe("Extension Lifecycle E2E", () => {
 		for (const h of shutdownHandlers) {
 			await h({ type: "session_shutdown" }, mockCtx);
 		}
-		expect(currentStatus).toBeUndefined();
+		expect(currentWidget).toBeUndefined();
 	});
 });

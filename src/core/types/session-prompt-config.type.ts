@@ -5,7 +5,7 @@ import type { PromptScope } from "./prompt-scope.type";
 export interface SessionPromptConfig {
 	file: string | null;
 	scope?: PromptScope;
-	activePrompts: ActivePromptRef[];
+	activePrompts?: ActivePromptRef[];
 	mode: MergeMode;
 	enabled: boolean;
 }

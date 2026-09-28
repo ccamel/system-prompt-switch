@@ -1,5 +1,5 @@
-import { spawnSync } from "node:child_process";
 import * as path from "node:path";
+import { logger } from "./logger";
 import { buildSystemPrompt } from "./prompt-builder";
 import type { ActivePromptRef } from "./types/active-prompt-ref.type";
 import type {
@@ -15,6 +15,12 @@ import type { UIPort } from "../ports/ui.port";
 
 export const NONE_OPTION = "(None / Default)";
 export const CREATE_NEW_OPTION = "+ Create new prompt...";
+export const CREATE_NEW_GLOBAL_OPTION = "+ Create new [global] prompt (~/.omp or ~/.pi)";
+export const CREATE_NEW_LOCAL_OPTION = "+ Create new [local] prompt (.agents/...)";
+
+export interface ResolvedSessionPromptConfig extends SessionPromptConfig {
+	activePrompts: ActivePromptRef[];
+}
 
 export class PromptService {
 	constructor(
@@ -23,17 +29,21 @@ export class PromptService {
 		private readonly ui: UIPort,
 	) {}
 
-	async getCurrentConfig(sessionId: string): Promise<SessionPromptConfig> {
+	async getCurrentConfig(sessionId: string): Promise<ResolvedSessionPromptConfig> {
 		const existing = await this.sessionState.getSessionConfig(sessionId);
 		if (existing) {
-			if (!existing.activePrompts) {
-				existing.activePrompts = existing.file
-					? [{ name: existing.file, scope: existing.scope ?? "global" }]
-					: [];
-			}
-			return existing;
+			const activePrompts =
+				existing.activePrompts && existing.activePrompts.length > 0
+					? existing.activePrompts
+					: existing.file
+						? [{ name: existing.file, scope: existing.scope ?? "global" }]
+						: [];
+			return {
+				...existing,
+				activePrompts,
+			};
 		}
-		const fallback: SessionPromptConfig = {
+		const fallback: ResolvedSessionPromptConfig = {
 			file: null,
 			scope: undefined,
 			activePrompts: [],
@@ -47,40 +57,33 @@ export class PromptService {
 	async updateStatus(sessionId: string): Promise<void> {
 		if (!this.ui.hasUI()) return;
 		const config = await this.getCurrentConfig(sessionId);
+
 		if (!config.enabled) {
-			this.ui.setStatus("🎯 sps: disabled");
 			this.ui.setWidget(undefined);
 			return;
 		}
-
-		const activeList =
-			config.activePrompts && config.activePrompts.length > 0
-				? config.activePrompts
-				: config.file
-					? [{ name: config.file, scope: config.scope ?? "global" }]
-					: [];
-
+		const activeList = config.activePrompts;
 		if (activeList.length === 0) {
-			this.ui.setStatus("🎯 sps: none");
 			this.ui.setWidget(undefined);
 		} else {
 			const label = activeList
 				.map((p) => `[${p.scope}] ${p.name}`)
 				.join(" + ");
-			this.ui.setStatus(`🎯 sps: ${label} [${config.mode}]`);
 			this.ui.setWidget([
 				`╭─ 🎯 Active Prompt: ${label} (${config.mode} mode) ─╮`,
 			]);
 		}
 	}
 
-	private formatOption(name: string, scope: PromptScope): string {
-		return `[${scope}] ${name}`;
-	}
 
 	private parseOption(option: string): { name: string; scope?: PromptScope } {
 		const clean = option.replace(/\s+✓$/, "").trim();
-		if (clean === NONE_OPTION || clean === CREATE_NEW_OPTION) {
+		if (
+			clean === NONE_OPTION ||
+			clean === CREATE_NEW_OPTION ||
+			clean === CREATE_NEW_GLOBAL_OPTION ||
+			clean === CREATE_NEW_LOCAL_OPTION
+		) {
 			return { name: clean };
 		}
 		const match = clean.match(/^\[(local|global)\]\s+(.+)$/);
@@ -95,13 +98,14 @@ export class PromptService {
 		const files = await this.storage.list();
 
 		const options: string[] = [
-			config.file === null && (!config.activePrompts || config.activePrompts.length === 0)
+			config.file === null && config.activePrompts.length === 0
 				? `${NONE_OPTION}  ✓`
 				: NONE_OPTION,
-			CREATE_NEW_OPTION,
+			CREATE_NEW_GLOBAL_OPTION,
+			CREATE_NEW_LOCAL_OPTION,
 		];
 		for (const file of files) {
-			const formatted = this.formatOption(file.name, file.scope);
+			const formatted = `[${file.scope}] ${file.name}`;
 			const isSelected =
 				file.name === config.file && (!config.scope || config.scope === file.scope);
 			options.push(isSelected ? `${formatted}  ✓` : formatted);
@@ -114,8 +118,14 @@ export class PromptService {
 		if (!choice) return undefined;
 
 		const cleanChoice = choice.replace(/\s+✓$/, "").trim();
-		if (cleanChoice === CREATE_NEW_OPTION) {
-			return this.createNewPrompt(sessionId);
+		if (
+			cleanChoice === CREATE_NEW_GLOBAL_OPTION ||
+			cleanChoice === CREATE_NEW_OPTION
+		) {
+			return this.createNewPrompt(sessionId, "global");
+		}
+		if (cleanChoice === CREATE_NEW_LOCAL_OPTION) {
+			return this.createNewPrompt(sessionId, "local");
 		}
 
 		const parsed = this.parseOption(choice);
@@ -125,6 +135,7 @@ export class PromptService {
 			config.activePrompts = [];
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
+			logger.info("PROMPT_CLEAR", "Prompt cleared for session", { sessionId });
 			this.ui.notify(
 				"System prompt cleared. Takes effect on your next message.",
 				"info",
@@ -140,6 +151,10 @@ export class PromptService {
 		config.enabled = true;
 		await this.sessionState.setSessionConfig(sessionId, config);
 		await this.updateStatus(sessionId);
+		logger.info("PROMPT_SELECT", `Selected ${parsed.name}`, {
+			sessionId,
+			scope: parsed.scope,
+		});
 		const scopeLabel = config.scope ? `[${config.scope}] ` : "";
 		this.ui.notify(
 			`System prompt ${scopeLabel}"${config.file}" activated. Takes effect on your next message.`,
@@ -166,7 +181,7 @@ export class PromptService {
 
 		for (const file of files) {
 			const tag = isPromptActive(file.name, file.scope) ? " [INJECTED] ✓" : "";
-			options.push(`${this.formatOption(file.name, file.scope)}${tag}`);
+			options.push(`[${file.scope}] ${file.name}${tag}`);
 		}
 
 		const choice = await this.ui.select(
@@ -183,6 +198,9 @@ export class PromptService {
 			config.activePrompts = [];
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
+			logger.info("PROMPT_INJECT_CLEAR_ALL", "Cleared all injected prompts", {
+				sessionId,
+			});
 			this.ui.notify(
 				"All injected prompts cleared. Takes effect on your next message.",
 				"info",
@@ -207,6 +225,10 @@ export class PromptService {
 			}
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
+			logger.info("PROMPT_INJECT_REMOVE", `Removed ${targetName}`, {
+				sessionId,
+				targetScope,
+			});
 			this.ui.notify(
 				`Removed [${targetScope}] "${targetName}". Total active: ${config.activePrompts.length}. Takes effect on your next message.`,
 				"info",
@@ -219,6 +241,11 @@ export class PromptService {
 			config.enabled = true;
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
+			logger.info("PROMPT_INJECT_ADD", `Injected ${targetName}`, {
+				sessionId,
+				targetScope,
+				total: config.activePrompts.length,
+			});
 			this.ui.notify(
 				`Injected [${targetScope}] "${targetName}". Total active: ${config.activePrompts.length}. Takes effect on your next message.`,
 				"info",
@@ -226,59 +253,10 @@ export class PromptService {
 		}
 	}
 
-	private async chooseEditorAndEdit(
-		filePath: string,
-		fileName: string,
-		initialContent: string,
-	): Promise<string | undefined> {
-		if (!this.ui.hasUI()) return undefined;
-
-		const choice = await this.ui.select(
-			`Choose editor to open "${fileName}":`,
-			[
-				"1. OMP / Pi built-in editor (in-terminal TUI)",
-				"2. Visual Studio Code (code)",
-				"3. System terminal editor ($EDITOR / nano / vim)",
-			],
-		);
-		if (!choice) return undefined;
-
-		if (choice.includes("Visual Studio Code")) {
-			try {
-				this.ui.notify("Opening in VS Code... Save file when done.", "info");
-				const res = spawnSync("code", ["--wait", filePath], { stdio: "inherit" });
-				if (res.error) {
-					this.ui.notify(`VS Code error: ${res.error.message}`, "error");
-					return undefined;
-				}
-				const updated = await this.storage.read(fileName);
-				return updated ?? undefined;
-			} catch (err) {
-				this.ui.notify(`VS Code spawn failed: ${String(err)}`, "error");
-				return undefined;
-			}
-		}
-
-		if (choice.includes("System terminal editor")) {
-			const cmd = process.env.EDITOR || "nano";
-			try {
-				spawnSync(cmd, [filePath], { stdio: "inherit" });
-				const updated = await this.storage.read(fileName);
-				return updated ?? undefined;
-			} catch (err) {
-				this.ui.notify(`Terminal editor error: ${String(err)}`, "error");
-				return undefined;
-			}
-		}
-
-		// Built-in editor with explicit key hints
-		return this.ui.editor(
-			`Edit: ${fileName} [Enter = Save & Close | Shift+Enter = Newline | Esc = Cancel]`,
-			initialContent,
-		);
-	}
-
-	async createNewPrompt(sessionId?: string): Promise<string | null> {
+	async createNewPrompt(
+		sessionId?: string,
+		preselectedScope?: PromptScope,
+	): Promise<string | null> {
 		const rawName = await this.ui.input(
 			"Enter prompt file name (e.g. backend-dev.md):",
 		);
@@ -291,14 +269,14 @@ export class PromptService {
 			? rawName.trim()
 			: `${rawName.trim()}.md`;
 
-		// Choose target scope
-		let targetScope: PromptScope = "global";
-		if (this.ui.hasUI()) {
+		// Determine target scope
+		let targetScope: PromptScope = preselectedScope ?? "global";
+		if (!preselectedScope && this.ui.hasUI()) {
 			const scopeChoice = await this.ui.select(
 				"Choose destination for new prompt:",
 				[
-					"[local] Current repo (.agents/system-prompts-switch/)",
 					"[global] User home (~/.omp or ~/.pi)",
+					"[local] Current repo (.agents/system-prompts-switch/)",
 				],
 			);
 			if (scopeChoice && scopeChoice.includes("local")) {
@@ -306,6 +284,7 @@ export class PromptService {
 			}
 		}
 
+		// Collision check within target scope
 		const existing = await this.storage.read(cleanName, targetScope);
 		if (existing !== null) {
 			this.ui.notify(
@@ -315,49 +294,48 @@ export class PromptService {
 			return null;
 		}
 
-		// Target directory
-		const targetDir =
-			targetScope === "local"
-				? this.storage.getLocalDirectory()
-				: this.storage.getGlobalDirectory();
-		const targetPath = path.join(targetDir, cleanName);
-
-		// Write initial stub so external editors can open the file
 		const initialStub = `# ${cleanName.replace(/\.md$/, "")}\n\n`;
-		await this.storage.write(cleanName, initialStub, targetScope);
 
-		const updated = await this.chooseEditorAndEdit(
-			targetPath,
-			cleanName,
+		// Open native editor directly with clean title
+		const updated = await this.ui.editor(
+			`Create: [${targetScope}] ${cleanName}`,
 			initialStub,
 		);
 		if (updated === undefined || updated.trim().length === 0) {
-			await this.storage.delete(cleanName, targetScope);
-			this.ui.notify("Prompt creation cancelled.", "info");
+			this.ui.notify("Prompt creation cancelled (empty or cancelled).", "info");
 			return null;
 		}
 
 		await this.storage.write(cleanName, updated, targetScope);
-		this.ui.notify(`Saved prompt: [${targetScope}] ${cleanName}`, "info");
+
+		const targetDir =
+			targetScope === "local"
+				? this.storage.getLocalDirectory()
+				: this.storage.getGlobalDirectory();
+		const fullPath = path.join(targetDir, cleanName);
+
+		logger.info("PROMPT_CREATE", `Created prompt ${cleanName}`, {
+			targetScope,
+			fullPath,
+		});
 
 		if (sessionId) {
-			const activate = await this.ui.confirm(
-				"Activate Prompt",
-				`Activate [${targetScope}] "${cleanName}" for the current session?`,
+			const config = await this.getCurrentConfig(sessionId);
+			config.file = cleanName;
+			config.scope = targetScope;
+			config.activePrompts = [{ name: cleanName, scope: targetScope }];
+			config.enabled = true;
+			await this.sessionState.setSessionConfig(sessionId, config);
+			await this.updateStatus(sessionId);
+			this.ui.notify(
+				`Saved and activated [${targetScope}] "${cleanName}".\nPath: ${fullPath}`,
+				"info",
 			);
-			if (activate) {
-				const config = await this.getCurrentConfig(sessionId);
-				config.file = cleanName;
-				config.scope = targetScope;
-				config.activePrompts = [{ name: cleanName, scope: targetScope }];
-				config.enabled = true;
-				await this.sessionState.setSessionConfig(sessionId, config);
-				await this.updateStatus(sessionId);
-				this.ui.notify(
-					`Activated [${targetScope}] "${cleanName}". Takes effect on your next message.`,
-					"info",
-				);
-			}
+		} else {
+			this.ui.notify(
+				`Saved prompt: [${targetScope}] ${cleanName}\nPath: ${fullPath}`,
+				"info",
+			);
 		}
 
 		return cleanName;
@@ -378,7 +356,7 @@ export class PromptService {
 		if (!targetFile || !files.some((f) => f.name === targetFile)) {
 			const choice = await this.ui.select(
 				"Select prompt to edit",
-				files.map((f) => this.formatOption(f.name, f.scope)),
+				files.map((f) => `[${f.scope}] ${f.name}`),
 			);
 			if (!choice) return false;
 			const parsed = this.parseOption(choice);
@@ -392,15 +370,9 @@ export class PromptService {
 			return false;
 		}
 
-		const targetDir =
-			targetScope === "local"
-				? this.storage.getLocalDirectory()
-				: this.storage.getGlobalDirectory();
-		const targetPath = path.join(targetDir, targetFile);
-
-		const updated = await this.chooseEditorAndEdit(
-			targetPath,
-			targetFile,
+		// Open native editor directly with clean title
+		const updated = await this.ui.editor(
+			`Edit: ${targetFile}`,
 			content,
 		);
 		if (updated === undefined) {
@@ -410,8 +382,16 @@ export class PromptService {
 
 		await this.storage.write(targetFile, updated, targetScope ?? "global");
 		await this.updateStatus(sessionId);
+
+		const targetDir =
+			targetScope === "local"
+				? this.storage.getLocalDirectory()
+				: this.storage.getGlobalDirectory();
+		const fullPath = path.join(targetDir, targetFile);
+
+		logger.info("PROMPT_EDIT", `Edited ${targetFile}`, { fullPath });
 		this.ui.notify(
-			`Updated prompt "${targetFile}". Takes effect on your next message.`,
+			`Updated prompt "${targetFile}".\nPath: ${fullPath}`,
 			"info",
 		);
 		return true;
@@ -426,7 +406,7 @@ export class PromptService {
 
 		const choice = await this.ui.select(
 			"Select prompt to delete",
-			files.map((f) => this.formatOption(f.name, f.scope)),
+			files.map((f) => `[${f.scope}] ${f.name}`),
 		);
 		if (!choice) return false;
 
@@ -461,6 +441,7 @@ export class PromptService {
 
 		await this.sessionState.setSessionConfig(sessionId, config);
 		await this.updateStatus(sessionId);
+		logger.info("PROMPT_DELETE", `Deleted ${target}`, { targetScope });
 		this.ui.notify(
 			`Deleted "${target}". Takes effect on your next message.`,
 			"info",
@@ -477,6 +458,7 @@ export class PromptService {
 		}
 		await this.sessionState.setSessionConfig(sessionId, config);
 		await this.updateStatus(sessionId);
+		logger.info("MODE_TOGGLE", `Mode set to ${config.mode}`, { sessionId });
 		this.ui.notify(
 			`Session prompt mode set to: ${config.mode}. Takes effect on your next message.`,
 			"info",
@@ -487,11 +469,7 @@ export class PromptService {
 	async promptNewSessionModal(sessionId: string): Promise<void> {
 		if (!this.ui.hasUI()) return;
 		const existing = await this.sessionState.getSessionConfig(sessionId);
-		if (
-			existing &&
-			(existing.file !== null ||
-				(existing.activePrompts && existing.activePrompts.length > 0))
-		) {
+		if (existing && existing.activePrompts && existing.activePrompts.length > 0) {
 			await this.updateStatus(sessionId);
 			return;
 		}
@@ -499,8 +477,9 @@ export class PromptService {
 		const files = await this.storage.list();
 		const options: string[] = [
 			`${NONE_OPTION}  ✓`,
-			CREATE_NEW_OPTION,
-			...files.map((f) => this.formatOption(f.name, f.scope)),
+			CREATE_NEW_GLOBAL_OPTION,
+			CREATE_NEW_LOCAL_OPTION,
+			...files.map((f) => `[${f.scope}] ${f.name}`),
 		];
 
 		const choice = await this.ui.select(
@@ -508,13 +487,32 @@ export class PromptService {
 			options,
 		);
 		if (!choice) {
+			const config: SessionPromptConfig = {
+				file: null,
+				scope: undefined,
+				activePrompts: [],
+				mode: "append",
+				enabled: true,
+			};
+			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
+			logger.info("MODAL_DEFAULT_NONE", "Dismissed modal -> default None", {
+				sessionId,
+			});
+			this.ui.notify(
+				"Using default system prompt (none). Takes effect on your next message.",
+				"info",
+			);
 			return;
 		}
 
 		const clean = choice.replace(/\s+✓$/, "").trim();
-		if (clean === CREATE_NEW_OPTION) {
-			await this.createNewPrompt(sessionId);
+		if (clean === CREATE_NEW_GLOBAL_OPTION || clean === CREATE_NEW_OPTION) {
+			await this.createNewPrompt(sessionId, "global");
+			return;
+		}
+		if (clean === CREATE_NEW_LOCAL_OPTION) {
+			await this.createNewPrompt(sessionId, "local");
 			return;
 		}
 
@@ -534,6 +532,10 @@ export class PromptService {
 
 		await this.sessionState.setSessionConfig(sessionId, config);
 		await this.updateStatus(sessionId);
+		logger.info("MODAL_SELECT", `Modal selected ${file ?? "none"}`, {
+			sessionId,
+			scope: parsed.scope,
+		});
 		if (file) {
 			const scopeLabel = parsed.scope ? `[${parsed.scope}] ` : "";
 			this.ui.notify(
@@ -541,6 +543,47 @@ export class PromptService {
 				"info",
 			);
 		}
+	}
+
+	async getPathsSummary(sessionId: string): Promise<string[]> {
+		const config = await this.getCurrentConfig(sessionId);
+		const files = await this.storage.list();
+
+		const lines: string[] = [
+			"=== System Prompt Switch — Paths ===",
+			"",
+			"Active Prompt:",
+		];
+
+		const activeList = config.activePrompts;
+		if (activeList.length === 0) {
+			lines.push("  (None / Default)");
+		} else {
+			for (const p of activeList) {
+				const dir =
+					p.scope === "local"
+						? this.storage.getLocalDirectory()
+						: this.storage.getGlobalDirectory();
+				lines.push(`  • [${p.scope}] ${path.join(dir, p.name)}`);
+			}
+		}
+
+		lines.push("");
+		lines.push("Directories:");
+		lines.push(`  Local:  ${this.storage.getLocalDirectory()}`);
+		lines.push(`  Global: ${this.storage.getGlobalDirectory()}`);
+
+		lines.push("");
+		lines.push("All Available Prompts:");
+		if (files.length === 0) {
+			lines.push("  (none)");
+		} else {
+			for (const f of files) {
+				lines.push(`  • [${f.scope.padEnd(6)}] ${f.path}`);
+			}
+		}
+
+		return lines;
 	}
 
 	async resolvePromptForTurn(
@@ -552,13 +595,7 @@ export class PromptService {
 			return input.basePrompt;
 		}
 
-		const activeList: ActivePromptRef[] =
-			config.activePrompts && config.activePrompts.length > 0
-				? config.activePrompts
-				: config.file
-					? [{ name: config.file, scope: config.scope ?? "global" }]
-					: [];
-
+		const activeList = config.activePrompts;
 		if (activeList.length === 0) {
 			return input.basePrompt;
 		}
@@ -578,6 +615,15 @@ export class PromptService {
 		if (chunks.length === 0) {
 			return input.basePrompt;
 		}
+
+		logger.info(
+			"PROMPT_TURN_RESOLVE",
+			`Injected ${chunks.length} prompt(s) in ${config.mode} mode`,
+			{
+				sessionId,
+				prompts: chunks.map((c) => `[${c.scope}] ${c.name}`),
+			},
+		);
 
 		return buildSystemPrompt({
 			...input,

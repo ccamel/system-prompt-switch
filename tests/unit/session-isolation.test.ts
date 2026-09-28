@@ -24,7 +24,6 @@ class DummyUI implements UIPort {
 		return false;
 	}
 	notify(): void {}
-	setStatus(): void {}
 	setWidget(): void {}
 }
 

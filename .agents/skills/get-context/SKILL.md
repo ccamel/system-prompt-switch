@@ -9,5 +9,5 @@ Run this skill when you need an immediate overview of the plugin architecture, i
 ## How to run
 
 ```bash
-.skills/skills/get-context/scripts/get-context.sh
+.agents/skills/get-context/scripts/get-context.sh
 ```
