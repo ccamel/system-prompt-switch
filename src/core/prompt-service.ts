@@ -75,10 +75,10 @@ export class PromptService {
 		}
 
 		const activeList = config.activePrompts;
-		const label =
-			activeList.length === 0
-				? "(none)"
-				: activeList.map((p) => `[${p.scope}] ${p.name}`).join(" + ");
+		const primary = activeList[0];
+		const label = primary
+			? `[${primary.scope}] ${primary.name}`
+			: "(none)";
 
 		this.ui.setWidget([
 			`╭─ 🎯 Active Prompt: ${label} (${config.mode} mode) ─╮`,
@@ -200,6 +200,8 @@ export class PromptService {
 
 		const isPromptActive = (name: string, scope: PromptScope) =>
 			config.activePrompts.some((p) => p.name === name && p.scope === scope);
+		const isPrimary = (name: string, scope: PromptScope) =>
+			config.file === name && config.scope === scope;
 
 		const options: string[] = [
 			"(Clear all injected prompts / Reset to Default)",
@@ -207,7 +209,12 @@ export class PromptService {
 		];
 
 		for (const file of files) {
-			const tag = isPromptActive(file.name, file.scope) ? " [INJECTED] ✓" : "";
+			let tag = "";
+			if (isPrimary(file.name, file.scope)) {
+				tag = " [SELECTED] ✓";
+			} else if (isPromptActive(file.name, file.scope)) {
+				tag = " [INJECTED] ✓";
+			}
 			options.push(`[${file.scope}] ${file.name}${tag}`);
 		}
 
@@ -235,7 +242,9 @@ export class PromptService {
 			return;
 		}
 
-		const parsed = this.parseOption(choice.replace(/\s+\[INJECTED\]\s+✓$/, ""));
+		const parsed = this.parseOption(
+			choice.replace(/\s+\[(INJECTED|SELECTED)\]\s+✓$/, ""),
+		);
 		const targetName = parsed.name;
 		const targetScope = parsed.scope ?? "global";
 
@@ -245,11 +254,18 @@ export class PromptService {
 
 		if (existingIndex >= 0) {
 			// Toggle off
-			config.activePrompts.splice(existingIndex, 1);
+			// ponytail: refuse to toggle off the active primary; /sps-inject is for
+			// stacking extras, /sps-select is for changing the primary. Toggling the
+			// primary here would silently flip the user's selection to a non-primary
+			// or to none, which surprised users.
 			if (config.file === targetName && config.scope === targetScope) {
-				config.file = config.activePrompts[0]?.name ?? null;
-				config.scope = config.activePrompts[0]?.scope;
+				this.ui.notify(
+					`[${targetScope}] "${targetName}" is your active primary. Use /sps-select to change it.`,
+					"info",
+				);
+				return;
 			}
+			config.activePrompts.splice(existingIndex, 1);
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
 			logger.info("PROMPT_INJECT_REMOVE", `Removed ${targetName}`, {
@@ -262,7 +278,11 @@ export class PromptService {
 			);
 		} else {
 			// Toggle on
-			config.activePrompts.push({ name: targetName, scope: targetScope });
+			config.activePrompts.push({
+				name: targetName,
+				scope: targetScope,
+				injected: true,
+			});
 			config.file = config.activePrompts[0].name;
 			config.scope = config.activePrompts[0].scope;
 			config.enabled = true;
@@ -643,6 +663,20 @@ export class PromptService {
 
 		if (chunks.length === 0) {
 			return input.basePrompt;
+		}
+
+		// ponytail: consume injected entries after one turn. Keep the primary
+		// (index 0) even if it somehow carries injected: true; defensive only,
+		// the inject modal refuses to toggle-off the primary.
+		const beforeCount = activeList.length;
+		config.activePrompts = activeList.filter(
+			(ref, idx) => !ref.injected || idx === 0,
+		);
+		if (config.activePrompts.length !== beforeCount) {
+			config.file = config.activePrompts[0]?.name ?? null;
+			config.scope = config.activePrompts[0]?.scope;
+			await this.sessionState.setSessionConfig(sessionId, config);
+			await this.updateStatus(sessionId);
 		}
 
 		logger.info(

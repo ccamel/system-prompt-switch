@@ -304,7 +304,7 @@ describe("PromptService", () => {
 
 		config = await service.getCurrentConfig("sess-1");
 		expect(config.activePrompts.length).toBe(2);
-		expect(ui.currentWidget?.[0]).toContain("Active Prompt: [global] prompt1.md + [global] prompt2.md");
+		expect(ui.currentWidget?.[0]).toContain("Active Prompt: [global] prompt1.md (append mode)");
 
 		// Resolves turn with both prompts combined
 		const result = await service.resolvePromptForTurn("sess-1", {
@@ -312,6 +312,192 @@ describe("PromptService", () => {
 		});
 		expect(result).toContain("Prompt 1 content");
 		expect(result).toContain("Prompt 2 content");
+	});
+
+	it("keeps primary stable when injecting a same-named prompt from another scope", async () => {
+		storage.globalFiles.set("b.md", "Global B");
+		storage.localFiles.set("b.md", "Local B");
+		await sessionState.setSessionConfig("sess-1", {
+			file: "b.md",
+			scope: "local",
+			activePrompts: [{ name: "b.md", scope: "local" }],
+			mode: "append",
+			enabled: true,
+		});
+
+		ui.selectChoices = ["[global] b.md"];
+		await service.injectPrompt("sess-1");
+
+		const config = await service.getCurrentConfig("sess-1");
+		expect(config.activePrompts).toEqual([
+			{ name: "b.md", scope: "local" },
+			{ name: "b.md", scope: "global", injected: true },
+		]);
+		expect(config.file).toBe("b.md");
+		expect(config.scope).toBe("local");
+	});
+
+	it("does not toggle off the primary in inject modal", async () => {
+		await sessionState.setSessionConfig("sess-1", {
+			file: "b.md",
+			scope: "local",
+			activePrompts: [{ name: "b.md", scope: "local" }],
+			mode: "append",
+			enabled: true,
+		});
+		storage.localFiles.set("b.md", "Local B");
+
+		ui.selectChoices = ["[local] b.md [SELECTED] ✓"];
+		await service.injectPrompt("sess-1");
+
+		const config = await service.getCurrentConfig("sess-1");
+		expect(config.activePrompts).toEqual([
+			{ name: "b.md", scope: "local" },
+		]);
+		expect(config.file).toBe("b.md");
+		expect(config.scope).toBe("local");
+		expect(
+			ui.notifications.some((n) =>
+				n.message.toLowerCase().includes("primary"),
+			),
+		).toBe(true);
+	});
+
+	it("toggles off a non-primary injection without touching the primary", async () => {
+		storage.globalFiles.set("a.md", "A");
+		storage.localFiles.set("b.md", "Local B");
+		await sessionState.setSessionConfig("sess-1", {
+			file: "b.md",
+			scope: "local",
+			activePrompts: [
+				{ name: "b.md", scope: "local" },
+				{ name: "a.md", scope: "global" },
+			],
+			mode: "append",
+			enabled: true,
+		});
+
+		ui.selectChoices = ["[global] a.md [INJECTED] ✓"];
+		await service.injectPrompt("sess-1");
+
+		const config = await service.getCurrentConfig("sess-1");
+		expect(config.activePrompts).toEqual([
+			{ name: "b.md", scope: "local" },
+		]);
+		expect(config.file).toBe("b.md");
+		expect(config.scope).toBe("local");
+	});
+
+	it("does not change primary when injecting on a stack that already has one", async () => {
+		storage.globalFiles.set("a.md", "A");
+		storage.localFiles.set("b.md", "Local B");
+		await sessionState.setSessionConfig("sess-1", {
+			file: "b.md",
+			scope: "local",
+			activePrompts: [{ name: "b.md", scope: "local" }],
+			mode: "append",
+			enabled: true,
+		});
+
+		ui.selectChoices = ["[global] a.md"];
+		await service.injectPrompt("sess-1");
+
+		const config = await service.getCurrentConfig("sess-1");
+		expect(config.activePrompts).toEqual([
+			{ name: "b.md", scope: "local" },
+			{ name: "a.md", scope: "global", injected: true },
+		]);
+		expect(config.file).toBe("b.md");
+		expect(config.scope).toBe("local");
+	});
+
+	it("marks entries pushed by injectPrompt with injected: true", async () => {
+		storage.files.set("a.md", "A primary");
+		storage.files.set("b.md", "B extra");
+		await sessionState.setSessionConfig("sess-1", {
+			file: "a.md",
+			scope: "global",
+			activePrompts: [{ name: "a.md", scope: "global" }],
+			mode: "append",
+			enabled: true,
+		});
+
+		ui.selectChoices = ["[global] b.md"];
+		await service.injectPrompt("sess-1");
+
+		const config = await service.getCurrentConfig("sess-1");
+		const ref = config.activePrompts.find(
+			(p) => p.name === "b.md" && p.scope === "global",
+		);
+		expect(ref?.injected).toBe(true);
+	});
+
+	it("does not mark the primary as injected when selectPrompt sets it", async () => {
+		storage.files.set("a.md", "A");
+		ui.selectChoice = "[global] a.md";
+
+		await service.selectPrompt("sess-sel");
+
+		const config = await service.getCurrentConfig("sess-sel");
+		expect(config.activePrompts).toEqual([
+			{ name: "a.md", scope: "global" },
+		]);
+		expect(config.activePrompts[0].injected).toBeUndefined();
+	});
+
+	it("resolvePromptForTurn strips injected entries and keeps the primary", async () => {
+		storage.files.set("b.md", "B content");
+		storage.files.set("c.md", "C content");
+		await sessionState.setSessionConfig("sess-resolve", {
+			file: "b.md",
+			scope: "global",
+			activePrompts: [
+				{ name: "b.md", scope: "global" },
+				{ name: "c.md", scope: "global", injected: true },
+			],
+			mode: "append",
+			enabled: true,
+		});
+
+		const result = await service.resolvePromptForTurn("sess-resolve", {
+			basePrompt: "Base",
+		});
+		expect(result).toContain("B content");
+		expect(result).toContain("C content");
+
+		const config = await service.getCurrentConfig("sess-resolve");
+		expect(config.activePrompts).toEqual([
+			{ name: "b.md", scope: "global" },
+		]);
+
+		const nextResult = await service.resolvePromptForTurn("sess-resolve", {
+			basePrompt: "Base",
+		});
+		expect(nextResult).toContain("B content");
+		expect(nextResult).not.toContain("C content");
+	});
+
+	it("widget shows only the primary even when an injection is pending", async () => {
+		storage.files.set("b.md", "B content");
+		storage.files.set("c.md", "C content");
+		await sessionState.setSessionConfig("sess-widget", {
+			file: "b.md",
+			scope: "global",
+			activePrompts: [
+				{ name: "b.md", scope: "global" },
+				{ name: "c.md", scope: "global", injected: true },
+			],
+			mode: "append",
+			enabled: true,
+		});
+
+		await service.updateStatus("sess-widget");
+
+		expect(ui.currentWidget?.[0]).toContain(
+			"Active Prompt: [global] b.md (append mode)",
+		);
+		expect(ui.currentWidget?.[0]).not.toContain("c.md");
+		expect(ui.currentWidget?.[0]).not.toContain("extra");
 	});
 
 	it("defaults to None and clears widget when startup modal is dismissed", async () => {
