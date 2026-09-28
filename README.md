@@ -4,17 +4,39 @@
 
 A Pi / OMP extension that manages custom system prompts per session: interactive modals, cumulative stacking, two scopes (local repo + global home), CRUD commands, and an above-editor banner that always shows what's active.
 
-![Banner preview placeholder](docs/preview.png)
+![Active prompt banner](assets/imgs/img1.png)
 
 ---
 
 ## Install
 
+### OMP
+```bash
+omp install npm:system-prompt-switch
+```
+
+### PI
 ```bash
 pi install npm:system-prompt-switch
 ```
 
 That's it. The extension registers on next session start. Works in both Pi and OMP.
+
+---
+
+## Screenshots
+
+Startup session modal — pick a prompt or create one:
+
+![Startup session modal](assets/imgs/img2.png)
+
+Editor banner while creating a new prompt (Ctrl+Q submit, Esc cancel):
+
+![Editor area for create/edit system prompts](assets/imgs/img3.png)
+
+Demo video:
+
+[![Demo video](assets/imgs/img1.png)](assets/videos/presentation-video.mp4)
 
 ---
 
