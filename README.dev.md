@@ -1,0 +1,127 @@
+# system-prompt-switch — Dev Guide
+
+Hexagonal (Ports & Adapters) Pi/OMP extension written in TypeScript, ESM, bundled by Bun.
+
+---
+
+## Requirements
+
+- Bun ≥ 1.3
+- Node ≥ 22 (for `npm` tooling during publish)
+- Pi or OMP installed and on `PATH` (for the CLI smoke test)
+
+---
+
+## Layout
+
+```
+extensions/
+  index.ts                # Entry point registered with Pi/OMP (`package.json` -> `main` / `extensions`)
+src/
+  ports/                  # Inbound/outbound interfaces (UIPort, StoragePort, SessionStatePort)
+  adapters/               # Concrete impls: PiUIAdapter, FsStorageAdapter, SessionStateAdapter
+  core/                   # Domain logic: PromptService, prompt-builder, logger, paths
+  core/types/             # Shared domain types
+tests/
+  unit/                   # Domain tests with mock ports (no host required)
+  e2e/                    # Lifecycle tests + CLI smoke (requires host binary on PATH)
+.agents/
+  skills/                 # Project-local omp skills (not shipped to npm; see `.npmignore`)
+    get-context/
+  skills/bump-version/    # `bun pm version` + `git tag v<ver>` (no commit)
+```
+
+The domain never imports from `adapters/` or `extensions/`; tests inject mock implementations through the ports.
+
+---
+
+## Scripts
+
+```bash
+bun test                  # Run all 43 unit + e2e tests
+bun run typecheck         # tsc --noEmit
+bun run lint              # oxlint
+```
+
+The CLI smoke test auto-discovers the host binary — it spawns `pi` if available, otherwise `omp`. Both expose `-e <extension-path>`.
+
+---
+
+## Testing locally in OMP / Pi
+
+```bash
+# Isolated profile
+omp --no-extensions --profile test -e ./extensions/index.ts
+
+# Or link permanently
+omp plugin link .
+pi install ./              # for Pi
+```
+
+---
+
+## Editor shortcut caveat
+
+`host.ui.editor(title, prefill)` from `@earendil-works/pi-coding-agent` renders a hardcoded footer (`Ctrl+Q/Ctrl+Enter submit / Esc cancel / Ctrl+G external editor`). The host API takes no footer-template option, and the keypress stream is owned by the host, so we **cannot** suppress or intercept it from extension code.
+
+Workaround shipped in this repo: `PromptService.runEditorWithHint()` swaps the above-editor widget to a boxed banner that shows the real shortcuts, and restores the status widget in `finally`.
+
+---
+
+## Versioning
+
+Bump with the bundled skill:
+
+```bash
+bash .agents/skills/bump-version/scripts/bump-version.sh --patch   # 0.6.0 -> 0.6.1
+bash .agents/skills/bump-version/scripts/bump-version.sh --minor   # 0.6.0 -> 0.7.0
+bash .agents/skills/bump-version/scripts/bump-version.sh --major
+bash .agents/skills/bump-version/scripts/bump-version.sh           # status only
+```
+
+The skill uses `bun pm version <flag>` (which requires a clean tree) then creates an annotated `git tag v<ver>`. It does **not** create a commit — commit the change first.
+
+---
+
+## Publish to npm (becomes available on pi.dev/packages automatically)
+
+Prereqs:
+1. `npm login`
+2. `peerDependencies["@earendil-works/pi-coding-agent"]` is `"*"` (host packages must be `*` per Pi docs).
+3. `package.json` declares `"keywords": ["pi-package"]`.
+
+Flow:
+
+```bash
+# after committing all changes
+bash .agents/skills/bump-version/scripts/bump-version.sh --minor
+npm publish --access public
+```
+
+Smoke test the install:
+
+```bash
+pi install npm:system-prompt-switch@<version>
+pi list
+```
+
+The `.npmignore` keeps the tarball lean (no `.agents/`, no lockfiles, no VCS, no IDE noise). `tests/` is shipped so downstream contributors can run `bun test` immediately.
+
+---
+
+## Architecture notes
+
+- **Ports**: `src/ports/*.port.ts` define `UIPort`, `StoragePort`, `SessionStatePort`.
+- **Adapters**: `src/adapters/*.adapter.ts` implement those ports against Pi/OMP (`pi-ui.adapter.ts`), the filesystem (`fs-storage.adapter.ts`), and the session JSONL store (`session-state.adapter.ts`).
+- **Core**: `src/core/prompt-service.ts` is the only orchestrator. It owns prompt selection, mutation, mode, and the editor banner lifecycle.
+- **Why hexagonal**: keeps the domain unit-testable without spawning a host (the 42 unit tests run in <100ms; only the 2 e2e tests touch the host).
+
+---
+
+## Contributing
+
+PRs welcome. Keep tests green; add a unit test for any new domain logic; an e2e test only when exercising a host integration.
+
+## License
+
+[MIT](./LICENSE)

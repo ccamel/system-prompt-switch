@@ -1,125 +1,73 @@
 # system-prompt-switch
 
-Pi and OMP extension to manage custom system prompts **per session** with interactive selection modals, cumulative prompt injection, CRUD commands, session isolation, and multi-scope storage (`[local]` repo + `[global]` user home).
+> Pick, stack, edit, and forget — system prompts that follow you from Pi to OMP without re-explaining yourself.
+
+A Pi / OMP extension that manages custom system prompts per session: interactive modals, cumulative stacking, two scopes (local repo + global home), CRUD commands, and an above-editor banner that always shows what's active.
+
+![Banner preview placeholder](docs/preview.png)
 
 ---
 
-## Key Features
+## Install
 
-- **Multi-Scope Prompts:**
-  - **Local (`[local]`):** `<cwd>/.agents/system-prompts-switch/*.md` — Scoped to the current repository, committable to Git.
-  - **Global (`[global]`):** `~/.omp/agent/system-prompts-switch/*.md` (OMP) or `~/.pi/agent/system-prompts-switch/*.md` (Pi) — Available in all directories.
-- **Per-Session Isolation:** Prompt selections are bound to each session ID and logged to the session's JSONL file. Multiple concurrent or sequential sessions never leak prompt state into each other.
-- **Prominent Above-Editor Banner:** Active prompts render directly above the input prompt (`> |`):
-  ```
-  ╭─ 🎯 Active Prompt: [global] <system-prompt-name>.md (append mode) ─╮
-  ```
-  The banner disappears automatically when no custom prompt is active.
-- **Startup & New Session Modal:** On terminal launch or `/new`, an interactive modal appears offering:
-  - `(None / Default)`
-  - `+ Create new prompt...`
-  - All available `[local]` and `[global]` prompts
-- **Cumulative Prompt Stacking (`/sps-inject`):** Stack multiple prompts simultaneously into one session (e.g. `[global] <system-prompt-name>.md + [local] project-rules.md`).
-- **External Editor Support:** When creating or editing prompts, choose between:
-  1. Built-in terminal editor (with explicit hint: `Enter` to save, `Shift+Enter` for newline)
-  2. Visual Studio Code (`code --wait`)
-  3. System terminal editor (`$EDITOR` / `nano` / `vim`)
-- **Automatic Legacy Migration:** On first run, if `system-prompts-switch/` is empty, existing prompts from `~/.pi/agent/system-prompts/` are copied over automatically.
-- **Merge Modes:** Choose between `append` (safe default, keeps base instructions) and `replace` (custom prompt as base, preserves tools, skills, and project context).
+```bash
+pi install npm:system-prompt-switch
+```
+
+That's it. The extension registers on next session start. Works in both Pi and OMP.
+
+---
+
+## What it does
+
+- **Per-session prompts** — your active prompt is bound to the session ID, never leaks between concurrent or sequential sessions.
+- **Two scopes, one mental model** — `[local]` lives in your repo (`.agents/system-prompts-switch/`, committable), `[global]` lives in your home (`~/.pi` or `~/.omp/agent/system-prompts-switch/`). Same file can exist in both; local wins for the repo session.
+- **Stack multiple prompts** — `/sps-inject` adds prompts cumulatively. `[global] <system-prompt-name>.md + [local] project-rules.md` is a valid active state.
+- **Above-editor banner** — the active prompt is rendered directly above your input prompt so you never forget which one is loaded.
+- **Startup modal** — on terminal launch or `/new`, pick `(None)`, an existing prompt, or create a new one in either scope.
+- **Merge modes** — `append` (default, safe) keeps base instructions; `replace` uses your prompt as the base while preserving tools, skills, and project context.
+- **Live logging** to `~/.pi/agent/logs/system-prompt-switch.log` / `~/.omp/agent/logs/system-prompt-switch.log`, with `/sps-logs [lines]` inside the session.
 
 ---
 
 ## Commands
 
-| Command | Description |
+| Command | What it does |
 |---|---|
-| `/sps-select` | Open modal to pick a prompt for the current session (or choose `(None / Default)`) |
-| `/sps-inject` | Cumulatively stack or toggle multiple system prompts simultaneously |
-| `/sps-new` | Create a new `.md` prompt file directly in OMP (choose local vs global) |
-| `/sps-edit` | Edit an existing prompt in OMP's built-in editor |
-| `/sps-path` | Display copy-ready absolute paths for active prompt and all local/global files |
-| `/sps-delete` | Delete a prompt file from disk (resets session if it was active) |
-| `/sps-mode [append\|replace]` | Toggle or set prompt injection mode for this session |
-| `/sps-info` | Display active host (`OMP` or `PI`), active prompts, mode, session ID, and directories |
-| `/sps-logs [lines]` | Display recent session logs and print live tail command |
+| `/sps-select` | Pick the active prompt (or `(None / Default)`) |
+| `/sps-inject` | Stack or toggle multiple prompts for this session |
+| `/sps-new` | Create a new `.md` prompt (choose local vs global) |
+| `/sps-edit` | Edit an existing prompt in the built-in editor |
+| `/sps-path` | Print absolute paths for the active prompt and all local/global files |
+| `/sps-delete` | Delete a prompt file (resets session if it was active) |
+| `/sps-mode [append\|replace]` | Toggle or set the merge mode |
+| `/sps-info` | Show host, active prompts, mode, session ID, and directories |
+| `/sps-logs [lines]` | Tail the session log |
+
 ---
 
-## Directory Layout & Environment Variables
+## How prompts live
 
-| Scope / Host | Default Location | Override Environment Variable |
+| Scope | Default location | Override env |
 |---|---|---|
-| **Local Repo** | `<cwd>/.agents/system-prompts-switch/` | `SPS_LOCAL_PROMPT_DIR` |
-| **OMP Global** | `~/.omp/agent/system-prompts-switch/` | `SPS_PROMPT_DIR` or `SYSTEM_PROMPT_DIR` |
-| **Pi Global** | `~/.pi/agent/system-prompts-switch/` | `SPS_PROMPT_DIR` or `SYSTEM_PROMPT_DIR` |
-| **State File** | `~/.<host>/agent/state/system-prompt-switch/sessions.json` | `SPS_STATE_PATH` |
+| **Local (repo)** | `<cwd>/.agents/system-prompts-switch/` | `SPS_LOCAL_PROMPT_DIR` |
+| **Global** | `~/.omp/agent/system-prompts-switch/` (OMP) or `~/.pi/agent/system-prompts-switch/` (Pi) | `SPS_PROMPT_DIR` or `SYSTEM_PROMPT_DIR` |
+| **Session state** | `~/.<host>/agent/state/system-prompt-switch/sessions.json` | `SPS_STATE_PATH` |
 
-
-## Live Debugging & Logs
-
-All session events, modal choices, editor launches, and injection steps are logged to disk:
-
-- **OMP log:** `~/.omp/agent/logs/system-prompt-switch.log`
-- **Pi log:** `~/.pi/agent/logs/system-prompt-switch.log`
-
-### 1. Real-time log tailing in a second terminal:
-```bash
-# For OMP
-tail -f ~/.omp/agent/logs/system-prompt-switch.log
-
-# For Pi
-tail -f ~/.pi/agent/logs/system-prompt-switch.log
-```
-
-### 2. View logs inside your running session:
-```
-/sps-logs
-/sps-logs 50
-```
+Legacy prompts in `~/.pi/agent/system-prompts/` are auto-migrated on first run.
 
 ---
 
-## Keyboard Shortcuts & Editor Behavior
+## Editor shortcut note
 
-- **Submit & Save:** `Ctrl+Q` (Windows/WSL Terminal) or `\ + Enter` (standard terminal)
-- **Insert Newline:** `Enter` or `Shift+Enter`
-- **Cancel / Close Dialog:** `Esc`
-- **Manual Editing:** Run `/sps-path` to print absolute file paths, then edit files directly by hand in your preferred editor (VS Code, Cursor, etc.).
+When `/sps-new` or `/sps-edit` opens the built-in editor, an above-editor banner shows the **real** shortcuts: **Ctrl+Q** to submit, **Esc** to cancel. The host's footer also advertises `Ctrl+Enter submit` and `Ctrl+G external editor` — these are **not** wired by this extension; ignore them.
 
 ---
 
-## Prompt Name Collision Rules
+## For developers
 
-- **Local vs. Global Coexistence:** You can have `[local] guidelines.md` and `[global] guidelines.md` simultaneously. Both will appear in `/sps-select` and `/sps-inject` clearly tagged by scope.
-- **Same-Scope Collision:** Creating a prompt that already exists in the *same* scope (e.g. creating in `local` when `local/guidelines.md` exists) is rejected with an error notification.
----
+Architecture, build, test, and contribution guide: see **[README.dev.md](./README.dev.md)**.
 
-## Testing & Usage
+## License
 
-### 1. Test in OMP with clean isolation (recommended)
-Launch OMP without other plugins and in a clean profile:
-```bash
-omp --no-extensions --profile test -e ./extensions/index.ts
-```
-
-### 2. Test in OMP with your current profile
-```bash
-omp --no-extensions -e ./extensions/index.ts
-```
-
-### 3. Link permanently in OMP
-To have `system-prompt-switch` load automatically on every session:
-```bash
-omp plugin link .
-```
-
-### 4. Run automated test suite
-Runs all 36 unit and E2E tests:
-```bash
-bun test
-```
-
-### 5. Run whole-project linter
-Fast linting via Oxlint:
-```bash
-bun run lint
-```
+[MIT](./LICENSE)
