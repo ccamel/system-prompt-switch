@@ -1,29 +1,43 @@
 # bump-version
 
-Show the current package version and, on request, bump it via `bun pm version` (which edits `package.json`, creates a git commit `<new-version>`, and creates an annotated git tag `v<new-version>`).
+Show the current package version and, on request, bump it in `package.json` (no commit, no tag) or create an annotated git tag at the current HEAD. Designed for a workflow where the human commits and pushes manually.
 
 ## When to use
 
-Run this skill when you need a quick status read on the project version or want to bump `package.json` (patch / minor / major) with a single canonical command.
+Run this skill when you need a quick status read on the project version, want to bump `package.json` (patch / minor / major) for review and manual commit, or want to create the `v<semver>` tag at HEAD.
 
 ## How to run
 
 ```bash
 .agents/skills/bump-version/scripts/bump-version.sh           # status only
-.agents/skills/bump-version/scripts/bump-version.sh --patch   # bun pm version patch
-.agents/skills/bump-version/scripts/bump-version.sh --minor   # bun pm version minor
-.agents/skills/bump-version/scripts/bump-version.sh --major   # bun pm version major
+.agents/skills/bump-version/scripts/bump-version.sh --patch   # edit package.json to next patch; no commit
+.agents/skills/bump-version/scripts/bump-version.sh --minor   # edit package.json to next minor; no commit
+.agents/skills/bump-version/scripts/bump-version.sh --major   # edit package.json to next major; no commit
+.agents/skills/bump-version/scripts/bump-version.sh --tag     # create annotated tag v<version> at HEAD
 .agents/skills/bump-version/scripts/bump-version.sh --help
 ```
 
 ## Behavior
 
 - **No flag** — prints status (name, current version, last git tag, current branch). No file changes.
-- **`--patch | --minor | --major`** — calls `bun pm version <flag>`. Bun requires a clean working tree, then in one step: edits `package.json`, creates a git commit, and creates an annotated git tag `v<new-version>`. The skill does NOT create any additional commit or tag.
+- **`--patch | --minor | --major`** — edits `package.json` in place to the next semver version. Does **not** commit, does **not** tag. Works on a dirty working tree (your other changes stay alongside the version bump in the staging area).
+- **`--tag`** — reads the current `version` from `package.json` and creates an annotated git tag `v<version>` at the current commit. Refuses if the tag already exists.
 - **`--help`** — usage.
+
+## Workflow
+
+The skill is intentionally split so the human controls every commit and push:
+
+1. `bump-version.sh --minor` — bumps `package.json`.
+2. Review the diff with `git diff package.json`. Commit yourself: `git add package.json && git commit`.
+3. (optional, recommended) `bump-version.sh --tag` — creates `v<version>` tag at HEAD.
+4. Push yourself: `git push` and `git push --tags`.
+5. Publish yourself: `npm publish --access public`.
+
+The full publish playbook lives in the `release` skill.
 
 ## Notes
 
-- The working tree must be clean (no uncommitted changes). Commit or stash before running.
-- If a tag `v<new-version>` already exists, `bun pm version` will fail — surface that error and resolve manually.
 - The displayed version has no leading `v`; the tag is `v<semver>` (per repo convention).
+- If the tag `v<version>` already exists, `--tag` refuses to overwrite — bump again.
+- `--patch` / `--minor` / `--major` work on a dirty tree; `--tag` does not (a tag points at a clean commit).
