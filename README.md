@@ -4,7 +4,7 @@
 
 A Pi / OMP extension that manages custom system prompts per session: interactive modals, cumulative stacking, two scopes (local repo + global home), CRUD commands, and an above-editor banner that always shows what's active.
 
-![Active prompt banner](assets/imgs/img1.png)
+![Active prompt banner](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/imgs/img1.png)
 
 ---
 
@@ -28,15 +28,15 @@ That's it. The extension registers on next session start. Works in both Pi and O
 
 Startup session modal — pick a prompt or create one:
 
-![Startup session modal](assets/imgs/img2.png)
+![Startup session modal](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/imgs/img2.png)
 
 Editor banner while creating a new prompt (Ctrl+Q submit, Esc cancel):
 
-![Editor area for create/edit system prompts](assets/imgs/img3.png)
+![Editor area for create/edit system prompts](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/imgs/img3.png)
 
 Demo video:
 
-[![Demo video](assets/imgs/img1.png)](assets/videos/presentation-video.mp4)
+[![Demo video](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/imgs/img1.png)](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/videos/presentation-video.mp4)
 
 ---
 
