@@ -106,7 +106,7 @@ The publish output should end with `+ system-prompt-switch@<version>`. Anything 
 ```bash
 # Confirm the package metadata is what we expect.
 npm view system-prompt-switch
-# Expected fields: name, version, keywords (must include 'pi-package'), pi.extensions, pi.image, pi.video,
+# Expected fields: name, version, keywords (must include 'pi-package'), pi.extensions, pi.image,
 # license, peerDependencies (must include @earendil-works/pi-coding-agent).
 
 # Confirm the tarball resolves.
@@ -124,8 +124,7 @@ https://pi.dev/packages/system-prompt-switch
 
 The package page should render:
 - Hero image from `pi.image` (raw.githubusercontent.com URL)
-- Demo video link from `pi.video`
-- README content
+- README content with inline demo GIFs
 - All 9 commands (`/sps-select`, `/sps-inject`, `/sps-new`, `/sps-edit`, `/sps-delete`, `/sps-mode`, `/sps-info`, `/sps-path`, `/sps-logs`)
 
 The gallery index page (https://pi.dev/packages) is regenerated periodically by the pi-mono maintainers; it may take 1–24 hours for a brand-new package (or new version) to appear there. The direct link works immediately.

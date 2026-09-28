@@ -34,9 +34,19 @@ Editor banner while creating a new prompt (Ctrl+Q submit, Esc cancel):
 
 ![Editor area for create/edit system prompts](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/imgs/img3.png)
 
-Demo video:
+Demo GIFs:
 
-[![Demo video](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/imgs/img1.png)](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/videos/presentation-video.mp4)
+**1. Pick a prompt at startup**
+
+![Demo: pick a prompt at startup](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/demo-1-welcome.gif)
+
+**2. Active prompt banner + editor shortcuts (Ctrl+Q submit, Esc cancel)**
+
+![Demo: active banner + shortcuts](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/demo-2-editor.gif)
+
+**3. `/sps-inject` — stack multiple prompts for one session**
+
+![Demo: /sps-inject](https://raw.githubusercontent.com/plantaeart/system-prompt-switch/master/assets/gifs/demo-3-inject.gif)
 
 ---
 
