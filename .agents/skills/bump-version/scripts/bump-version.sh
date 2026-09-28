@@ -9,12 +9,14 @@ if [ "${FLAG}" = "--help" ] || [ "${FLAG}" = "-h" ]; then
 Usage: bump-version.sh [--patch|--minor|--major|--help]
 
 No flag      Show status (name, version, last tag, branch). No changes.
---patch      Run `bun pm version patch`, then create git tag v<new>.
---minor      Run `bun pm version minor`, then create git tag v<new>.
---major      Run `bun pm version major`, then create git tag v<new>.
+--patch      Run `bun pm version patch` (bumps package.json, commits, tags).
+--minor      Run `bun pm version minor`.
+--major      Run `bun pm version major`.
 --help       Show this help.
 
-Tag is created at current HEAD. No commit is made.
+`bun pm version` requires a clean working tree, edits package.json, creates a
+git commit "<new-version>", and creates an annotated git tag v<new-version>.
+The script only wraps it; it does not create any extra commit or tag.
 EOF
   exit 0
 fi
@@ -30,7 +32,6 @@ esac
 
 cd "${ROOT_DIR}"
 
-# --- Status reader ---
 NAME=$(grep -o '"name": *"[^"]*"' package.json | cut -d'"' -f4)
 VERSION=$(grep -o '"version": *"[^"]*"' package.json | cut -d'"' -f4)
 
@@ -58,39 +59,24 @@ print_status() {
   echo "============================================================"
 }
 
-# --- No flag: status only ---
 if [ -z "${FLAG}" ]; then
   print_status
   exit 0
 fi
 
-# --- Apply bump ---
 if ! command -v bun >/dev/null 2>&1; then
   echo "bun not found in PATH" >&2
   exit 1
 fi
 
-# `bun pm version <flag>` prints the new version on stdout (e.g. "0.1.1").
-NEW_VERSION=$(bun pm version "${FLAG#--}")
-NEW_VERSION="${NEW_VERSION//[$'\r\n ']/}"
+# `bun pm version <flag>` requires a clean tree. It edits package.json,
+# creates a git commit, and creates an annotated git tag v<new>.
+bun pm version "${FLAG#--}"
 
-if ! command -v git >/dev/null 2>&1; then
-  echo "git not found in PATH — package.json bumped to ${NEW_VERSION} but tag was not created." >&2
-  exit 1
+# Refresh local vars from disk for status block
+VERSION=$(grep -o '"version": *"[^"]*"' package.json | cut -d'"' -f4)
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "(no tags)")
 fi
-
-TAG="v${NEW_VERSION}"
-if git rev-parse --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
-  echo "Tag ${TAG} already exists — aborting before tagging." >&2
-  echo "package.json was bumped to ${NEW_VERSION}; resolve the conflict manually." >&2
-  exit 1
-fi
-
-git tag -a "${TAG}" -m "Release ${TAG}"
-echo "Tagged HEAD as ${TAG}"
-
-# Refresh local vars for status block
-VERSION="${NEW_VERSION}"
-LAST_TAG="${TAG}"
 
 print_status
