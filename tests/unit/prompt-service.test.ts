@@ -151,7 +151,7 @@ describe("PromptService", () => {
 
 		const updated = await service.getCurrentConfig("sess-1");
 		expect(updated.file).toBeNull();
-		expect(ui.currentWidget).toBeUndefined();
+		expect(ui.currentWidget?.[0]).toContain("Active Prompt: (none) (append mode)");
 	});
 
 	it("selects a file when chosen in selectPrompt", async () => {
@@ -211,7 +211,7 @@ describe("PromptService", () => {
 
 		const updated = await service.getCurrentConfig("sess-1");
 		expect(updated.file).toBeNull();
-		expect(ui.currentWidget).toBeUndefined();
+		expect(ui.currentWidget?.[0]).toContain("Active Prompt: (none) (append mode)");
 	});
 
 	it("toggles mode between append and replace", async () => {
@@ -275,7 +275,7 @@ describe("PromptService", () => {
 		const config = await service.getCurrentConfig("sess-dismiss");
 		expect(config.file).toBeNull();
 		expect(config.activePrompts.length).toBe(0);
-		expect(ui.currentWidget).toBeUndefined();
+		expect(ui.currentWidget?.[0]).toContain("Active Prompt: (none) (append mode)");
 	});
 
 	it("allows creating a local prompt with the same name as an existing global prompt", async () => {

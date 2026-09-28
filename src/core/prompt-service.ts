@@ -59,20 +59,21 @@ export class PromptService {
 		const config = await this.getCurrentConfig(sessionId);
 
 		if (!config.enabled) {
-			this.ui.setWidget(undefined);
+			this.ui.setWidget([
+				`╭─ 🎯 Active Prompt: (disabled) (${config.mode} mode) ─╮`,
+			]);
 			return;
 		}
+
 		const activeList = config.activePrompts;
-		if (activeList.length === 0) {
-			this.ui.setWidget(undefined);
-		} else {
-			const label = activeList
-				.map((p) => `[${p.scope}] ${p.name}`)
-				.join(" + ");
-			this.ui.setWidget([
-				`╭─ 🎯 Active Prompt: ${label} (${config.mode} mode) ─╮`,
-			]);
-		}
+		const label =
+			activeList.length === 0
+				? "(none)"
+				: activeList.map((p) => `[${p.scope}] ${p.name}`).join(" + ");
+
+		this.ui.setWidget([
+			`╭─ 🎯 Active Prompt: ${label} (${config.mode} mode) ─╮`,
+		]);
 	}
 
 
