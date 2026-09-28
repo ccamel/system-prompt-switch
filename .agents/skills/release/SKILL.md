@@ -143,6 +143,16 @@ pi
 
 Note: `omp plugin upgrade` is **only for marketplace** plugins (`name@marketplace`). For npm-installed plugins like ours, omp's own help message confirms: "For an npm-installed plugin, upgrade with: `omp plugin install <name> --force`". So `--force` on install IS the official update path.
 
+In some omp versions, `--force` resolves to an **older cached version** instead of the current `latest` tag on npm (e.g. the command says "Installed @0.8.0" while npm has 0.9.2). If that happens, fall back to a full uninstall + reinstall, which is reliable:
+
+```bash
+omp plugin uninstall system-prompt-switch
+rm -rf ~/.omp/plugins/node_modules/system-prompt-switch
+omp plugin install npm:system-prompt-switch
+# Verify the freshly installed copy is the version you expect:
+grep '"version"' ~/.omp/plugins/node_modules/system-prompt-switch/package.json
+```
+
 In a fresh session, type `/sps` and confirm all 9 commands appear in the autocompletion. Run `/sps-info` to see the host, active prompts, mode, session ID.
 
 ## Common failure modes
