@@ -291,9 +291,10 @@ describe("PromptService", () => {
 		const result = await service.resolvePromptForTurn("sess-1", {
 			basePrompt: "Base prompt",
 		});
-		expect(result).toBe(
-			"Base prompt\n\n---\n\n## Custom system prompt\n\n### [global] pirate.md\n\nSpeak like a pirate captain.",
-		);
+		expect(result).toContain("Base prompt");
+		expect(result).toContain("System Prompt Switch (extension context)");
+		expect(result).toContain("### [global] pirate.md");
+		expect(result).toContain("Speak like a pirate captain.");
 	});
 
 	it("cumulatively injects multiple prompts", async () => {
@@ -507,6 +508,44 @@ describe("PromptService", () => {
 		);
 		expect(ui.currentWidget?.[0]).not.toContain("c.md");
 		expect(ui.currentWidget?.[0]).not.toContain("extra");
+	});
+
+	it("resolvePromptForTurn injects an extension-context block even when no user prompt is active", async () => {
+		await sessionState.setSessionConfig("sess-ctx-empty", {
+			file: null,
+			scope: undefined,
+			activePrompts: [],
+			mode: "append",
+			enabled: true,
+		});
+
+		const result = await service.resolvePromptForTurn("sess-ctx-empty", {
+			basePrompt: "Base prompt.",
+		});
+
+		expect(result).toContain("Base prompt.");
+		expect(result).toContain("System Prompt Switch");
+		expect(result).toContain("~/.omp/agent/system-prompts-switch");
+	});
+
+	it("resolvePromptForTurn lists active prompts in the extension-context block", async () => {
+		storage.files.set("beh.md", "BEH content");
+		await sessionState.setSessionConfig("sess-ctx-active", {
+			file: "beh.md",
+			scope: "global",
+			activePrompts: [{ name: "beh.md", scope: "global" }],
+			mode: "append",
+			enabled: true,
+		});
+
+		const result = await service.resolvePromptForTurn("sess-ctx-active", {
+			basePrompt: "Base prompt.",
+		});
+
+		expect(result).toContain("Base prompt.");
+		expect(result).toContain("System Prompt Switch");
+		expect(result).toContain("[global] beh.md");
+		expect(result).toContain("BEH content");
 	});
 
 	it("defaults to None and clears widget when startup modal is dismissed", async () => {

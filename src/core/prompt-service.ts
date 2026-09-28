@@ -1,4 +1,6 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { logger } from "./logger";
 import { buildSystemPrompt } from "./prompt-builder";
 import type { ActivePromptRef } from "./types/active-prompt-ref.type";
@@ -29,6 +31,50 @@ const EDITOR_SHORTCUT_BANNER: string[] = [
 	"│ Cancel: Esc                       │",
 	"╰─ Ctrl+Enter / Ctrl+G ignored ─────╯",
 ];
+
+// ponytail: the agent-context chunk is loaded from a markdown template so it can
+// be edited without touching code. Path is resolved relative to the source file
+// so the bundle works whether the package is run from source, from a tgz, or
+// from a symlinked node_modules tree.
+const EXTENSION_CONTEXT_TEMPLATE_PATH = fileURLToPath(
+	new URL("../../assets/templates/extension-context.md", import.meta.url),
+);
+
+function loadExtensionContextTemplate(): string {
+	try {
+		return fs.readFileSync(EXTENSION_CONTEXT_TEMPLATE_PATH, "utf-8");
+	} catch (err) {
+		logger.warn(
+			"EXTENSION_CONTEXT_LOAD_FAILED",
+			"Could not load extension-context template; falling back to minimal stub",
+			{
+				path: EXTENSION_CONTEXT_TEMPLATE_PATH,
+				error: err instanceof Error ? err.message : String(err),
+			},
+		);
+		return [
+			"# System Prompt Switch",
+			"",
+			"- Active prompt(s): {activePrompts}",
+			"- Mode: {mode}",
+			"- Active prompt chunk follows.",
+		].join("\n");
+	}
+}
+
+function renderExtensionContext(
+	template: string,
+	activePrompts: ActivePromptRef[],
+	mode: MergeMode,
+): string {
+	const activeLine =
+		activePrompts.length > 0
+			? activePrompts.map((p) => `[${p.scope}] ${p.name}`).join(", ")
+			: "(none)";
+	return template
+		.replaceAll("{activePrompts}", activeLine)
+		.replaceAll("{mode}", mode);
+}
 
 export interface ResolvedSessionPromptConfig extends SessionPromptConfig {
 	activePrompts: ActivePromptRef[];
@@ -689,11 +735,23 @@ export class PromptService {
 		}
 
 		const activeList = config.activePrompts;
-		if (activeList.length === 0) {
-			return input.basePrompt;
-		}
 
-		const chunks: CustomPromptChunk[] = [];
+		// ponytail: always inject an extension-context chunk first so the agent
+		// knows this extension exists, where the user's prompt files live, and
+		// how to inspect/change them. The chunk is loaded from
+		// assets/templates/extension-context.md and templated with the current
+		// session state.
+		const extensionContext: CustomPromptChunk = {
+			name: "__system-prompt-switch-context__",
+			scope: "global",
+			content: renderExtensionContext(
+				loadExtensionContextTemplate(),
+				activeList,
+				config.mode,
+			),
+		};
+
+		const chunks: CustomPromptChunk[] = [extensionContext];
 		for (const promptRef of activeList) {
 			const content = await this.storage.read(promptRef.name, promptRef.scope);
 			if (content && content.trim().length > 0) {
@@ -703,10 +761,6 @@ export class PromptService {
 					content,
 				});
 			}
-		}
-
-		if (chunks.length === 0) {
-			return input.basePrompt;
 		}
 
 		// ponytail: consume injected entries after one turn. Keep the primary
@@ -725,10 +779,10 @@ export class PromptService {
 
 		logger.info(
 			"PROMPT_TURN_RESOLVE",
-			`Injected ${chunks.length} prompt(s) in ${config.mode} mode`,
+			`Injected ${chunks.length} chunk(s) (incl. extension context) in ${config.mode} mode`,
 			{
 				sessionId,
-				prompts: chunks.map((c) => `[${c.scope}] ${c.name}`),
+				chunks: chunks.map((c) => `[${c.scope}] ${c.name}`),
 			},
 		);
 

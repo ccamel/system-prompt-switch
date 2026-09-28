@@ -64,6 +64,7 @@ Demo GIFs:
 - **Two scopes, one mental model** — `[local]` lives in your repo (`.agents/system-prompts-switch/`, committable), `[global]` lives in your home (`~/.pi` or `~/.omp/agent/system-prompts-switch/`). Same file can exist in both; local wins for the repo session.
 - **Stack multiple prompts** — `/sps-inject` adds prompts cumulatively. `[global] <system-prompt-name>.md + [local] project-rules.md` is a valid active state.
 - **Above-editor banner** — the active prompt is rendered directly above your input prompt so you never forget which one is loaded.
+- **Self-describing extension context** — every resolved prompt includes a leading block that tells the LLM what this extension is, where prompt files live, and how to inspect/change them. The block is loaded from `assets/templates/extension-context.md` so you can tweak the wording without touching code.
 - **Startup modal** — on terminal launch or `/new`, pick `(None)`, an existing prompt, or create a new one in either scope.
 - **Merge modes** — `append` (default, safe) keeps base instructions; `replace` uses your prompt as the base while preserving tools, skills, and project context.
 - **Live logging** to `~/.pi/agent/logs/system-prompt-switch.log` / `~/.omp/agent/logs/system-prompt-switch.log`, with `/sps-logs [lines]` inside the session.
