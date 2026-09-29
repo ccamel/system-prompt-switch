@@ -8,4 +8,9 @@ export interface SessionPromptConfig {
 	activePrompts?: ActivePromptRef[];
 	mode: MergeMode;
 	enabled: boolean;
+	// ponytail: true once the user has answered the session-start prompt modal
+	// (including by dismissing it and choosing (None)). This is what makes a
+	// resume silent: inferring "already answered" from activePrompts.length
+	// cannot tell "chose None" apart from "never asked".
+	decided?: boolean;
 }

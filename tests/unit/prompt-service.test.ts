@@ -82,6 +82,7 @@ class MockSessionState implements SessionStatePort {
 class MockUI implements UIPort {
 	selectChoice: string | undefined;
 	selectChoices: string[] = [];
+	selectCalls = 0;
 	inputValue: string | undefined;
 	inputValues: string[] = [];
 	editorValue: string | undefined;
@@ -95,6 +96,7 @@ class MockUI implements UIPort {
 		return this.hasUIValue;
 	}
 	async select(): Promise<string | undefined> {
+		this.selectCalls++;
 		return this.selectChoices.shift() ?? this.selectChoice;
 	}
 
@@ -556,6 +558,69 @@ describe("PromptService", () => {
 		expect(config.file).toBeNull();
 		expect(config.activePrompts.length).toBe(0);
 		expect(ui.currentWidget?.[0]).toContain("Active Prompt: (none) (append mode)");
+	});
+
+	// --- Bug 1: resuming a session where the user already chose (None) must not re-ask ---
+
+	it("BUG 1: does not re-open the modal when the session already decided (None)", async () => {
+		await sessionState.setSessionConfig("sess-decided-none", {
+			file: null,
+			scope: undefined,
+			activePrompts: [],
+			mode: "append",
+			enabled: true,
+			decided: true,
+		});
+
+		await service.promptNewSessionModal("sess-decided-none");
+
+		expect(ui.selectCalls).toBe(0);
+		expect(ui.currentWidget?.[0]).toContain("Active Prompt: (none) (append mode)");
+	});
+
+	it("BUG 1: records decided=true after the modal is dismissed", async () => {
+		ui.selectChoices = [];
+		await service.promptNewSessionModal("sess-dismiss-marks");
+
+		const config = await service.getCurrentConfig("sess-dismiss-marks");
+		expect(config.decided).toBe(true);
+		expect(ui.selectCalls).toBe(1);
+
+		// A later resume must stay silent.
+		await service.promptNewSessionModal("sess-dismiss-marks");
+		expect(ui.selectCalls).toBe(1);
+	});
+
+	it("BUG 1: records decided=true after picking a prompt from the modal", async () => {
+		storage.files.set("beh.md", "BEH content");
+		ui.selectChoices = ["[global] beh.md"];
+
+		await service.promptNewSessionModal("sess-dismiss-pick");
+
+		const config = await service.getCurrentConfig("sess-dismiss-pick");
+		expect(config.decided).toBe(true);
+		expect(config.activePrompts).toEqual([
+			{ name: "beh.md", scope: "global" },
+		]);
+	});
+
+	it("BUG 1: does not re-open the modal when a decided session has a prompt selected", async () => {
+		storage.files.set("beh.md", "BEH content");
+		await sessionState.setSessionConfig("sess-decided-prompt", {
+			file: "beh.md",
+			scope: "global",
+			activePrompts: [{ name: "beh.md", scope: "global" }],
+			mode: "append",
+			enabled: true,
+			decided: true,
+		});
+
+		await service.promptNewSessionModal("sess-decided-prompt");
+
+		expect(ui.selectCalls).toBe(0);
+		expect(ui.currentWidget?.[0]).toContain(
+			"Active Prompt: [global] beh.md (append mode)",
+		);
 	});
 
 	it("allows creating a local prompt with the same name as an existing global prompt", async () => {

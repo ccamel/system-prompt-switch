@@ -209,6 +209,7 @@ export class PromptService {
 			config.file = null;
 			config.scope = undefined;
 			config.activePrompts = [];
+			config.decided = true;
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
 			logger.info("PROMPT_CLEAR", "Prompt cleared for session", { sessionId });
@@ -225,6 +226,7 @@ export class PromptService {
 			{ name: parsed.name, scope: parsed.scope ?? "global" },
 		];
 		config.enabled = true;
+		config.decided = true;
 		await this.sessionState.setSessionConfig(sessionId, config);
 		await this.updateStatus(sessionId);
 		logger.info("PROMPT_SELECT", `Selected ${parsed.name}`, {
@@ -279,6 +281,7 @@ export class PromptService {
 			config.file = null;
 			config.scope = undefined;
 			config.activePrompts = [];
+			config.decided = true;
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
 			logger.info("PROMPT_INJECT_CLEAR_ALL", "Cleared all injected prompts", {
@@ -463,6 +466,7 @@ export class PromptService {
 			config.scope = targetScope;
 			config.activePrompts = [{ name: cleanName, scope: targetScope }];
 			config.enabled = true;
+			config.decided = true;
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
 			this.ui.notify(
@@ -608,7 +612,10 @@ export class PromptService {
 	async promptNewSessionModal(sessionId: string): Promise<void> {
 		if (!this.ui.hasUI()) return;
 		const existing = await this.sessionState.getSessionConfig(sessionId);
-		if (existing && existing.activePrompts && existing.activePrompts.length > 0) {
+		// ponytail: only skip when the user has actually answered. Checking
+		// activePrompts.length instead re-asks forever after choosing (None),
+		// because "chose None" and "never asked" look identical.
+		if (existing?.decided === true) {
 			await this.updateStatus(sessionId);
 			return;
 		}
@@ -632,6 +639,7 @@ export class PromptService {
 				activePrompts: [],
 				mode: "append",
 				enabled: true,
+				decided: true,
 			};
 			await this.sessionState.setSessionConfig(sessionId, config);
 			await this.updateStatus(sessionId);
@@ -667,6 +675,7 @@ export class PromptService {
 			activePrompts,
 			mode: "append",
 			enabled: true,
+			decided: true,
 		};
 
 		await this.sessionState.setSessionConfig(sessionId, config);

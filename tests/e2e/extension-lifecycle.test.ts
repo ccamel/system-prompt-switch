@@ -108,7 +108,7 @@ describe("Extension Lifecycle E2E", () => {
 		// 1. Trigger session_start (reason: "new")
 		const sessionStartHandlers = eventHandlers.get("session_start")!;
 		for (const h of sessionStartHandlers) {
-			await h({ type: "session_start" }, mockCtx);
+			await h({ type: "session_start", reason: "new" }, mockCtx);
 		}
 		await selectDone;
 
@@ -140,5 +140,66 @@ describe("Extension Lifecycle E2E", () => {
 			await h({ type: "session_shutdown" }, mockCtx);
 		}
 		expect(currentWidget).toBeUndefined();
+	});
+
+	it("does not re-ask the prompt modal when session_start reason is resume", async () => {
+		const eventHandlers = new Map<string, ((e: unknown, c: unknown) => unknown)[]>();
+		const mockPi = {
+			registerCommand() {},
+			registerShortcut() {},
+			on(event: string, handler: (e: unknown, c: unknown) => unknown) {
+				const list = eventHandlers.get(event) ?? [];
+				list.push(handler);
+				eventHandlers.set(event, list);
+			},
+			appendEntry() {},
+		} as unknown as ExtensionAPI;
+
+		systemPromptSwitchExtension(mockPi);
+
+		let selectCalls = 0;
+		let currentWidget: string[] | undefined;
+		// updateStatus is fired detached from the session_start handler, so wait
+		// for the widget write itself instead of guessing a duration.
+		let widgetWritten = Promise.withResolvers<void>();
+		const mockCtx = {
+			hasUI: true,
+			cwd: tempDir,
+			sessionManager: {
+				getSessionId: () => "sess-resume",
+				getEntries: () => [],
+			},
+			ui: {
+				select: async () => {
+					selectCalls++;
+					return undefined;
+				},
+				notify: () => {},
+				setWidget: (_key: string, content: string[] | undefined) => {
+					currentWidget = content;
+					if (content) widgetWritten.resolve();
+				},
+			},
+		} as unknown as ExtensionContext;
+
+		const sessionStartHandlers = eventHandlers.get("session_start")!;
+
+		// A resume must never open the modal.
+		for (const h of sessionStartHandlers) {
+			await h({ type: "session_start", reason: "resume" }, mockCtx);
+		}
+		await widgetWritten.promise;
+		expect(selectCalls).toBe(0);
+		expect(currentWidget?.[0]).toContain("Active Prompt");
+
+		// Neither must a reload or a fork.
+		for (const reason of ["reload", "fork"] as const) {
+			widgetWritten = Promise.withResolvers<void>();
+			for (const h of sessionStartHandlers) {
+				await h({ type: "session_start", reason }, mockCtx);
+			}
+			await widgetWritten.promise;
+		}
+		expect(selectCalls).toBe(0);
 	});
 });

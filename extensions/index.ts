@@ -172,7 +172,11 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 			reason: event.reason,
 			sessionId,
 		});
-		if (!event.reason || event.reason === "new" || event.reason === "startup") {
+		// ponytail: only ask on a genuinely fresh session. Treating a missing
+		// reason as "new" made every resume re-ask; resume/reload/fork just
+		// refresh the widget, and the service's `decided` flag makes a second
+		// startup on the same session silent too.
+		if (event.reason === "startup" || event.reason === "new") {
 			// Detach modal from event watchdog so user dialogs have unlimited time
 			void service.promptNewSessionModal(sessionId);
 		} else {
