@@ -93,7 +93,7 @@ describe("Extension Lifecycle E2E", () => {
 			ui: {
 				select: async (_title: string, _options: string[]) => {
 					selectTriggered = true;
-					return "[global] test-prompt.md";
+					return "[omp] test-prompt.md";
 				},
 				notify: () => {},
 				setWidget: (_key: string, content: string[] | undefined) => {
@@ -113,7 +113,7 @@ describe("Extension Lifecycle E2E", () => {
 		await selectDone;
 
 		expect(selectTriggered).toBe(true);
-		expect(currentWidget?.[0]).toContain("[global] test-prompt.md (append mode)");
+		expect(currentWidget?.[0]).toContain("[omp] test-prompt.md (append mode)");
 
 		// 2. Trigger before_agent_start
 		const beforeAgentHandlers = eventHandlers.get("before_agent_start")!;

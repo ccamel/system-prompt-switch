@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { Logger, resolveLogPath } from "../../src/core/logger";
+import { HostPlatform } from "../../src/core/types/host-platform.type";
 
 describe("Logger", () => {
 	let tempDir: string;
@@ -22,21 +23,21 @@ describe("Logger", () => {
 	});
 
 	it("resolves default log path for omp and pi", () => {
-		const ompPath = resolveLogPath("omp");
+		const ompPath = resolveLogPath(HostPlatform.Omp);
 		expect(ompPath).toContain(".omp");
 		expect(ompPath).toContain("system-prompt-switch.log");
 
-		const piPath = resolveLogPath("pi");
+		const piPath = resolveLogPath(HostPlatform.Pi);
 		expect(piPath).toContain(".pi");
 		expect(piPath).toContain("system-prompt-switch.log");
 	});
 
 	it("respects custom log path and SPS_LOG_PATH env var", () => {
-		const custom = resolveLogPath("omp", "/custom/path/sps.log");
+		const custom = resolveLogPath(HostPlatform.Omp, "/custom/path/sps.log");
 		expect(custom).toBe("/custom/path/sps.log");
 
 		process.env.SPS_LOG_PATH = "/env/override.log";
-		expect(resolveLogPath("omp")).toBe("/env/override.log");
+		expect(resolveLogPath(HostPlatform.Omp)).toBe("/env/override.log");
 		delete process.env.SPS_LOG_PATH;
 	});
 

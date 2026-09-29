@@ -10,8 +10,10 @@ import { FsStorageAdapter } from "../src/adapters/fs-storage.adapter";
 import { PiUIAdapter } from "../src/adapters/pi-ui.adapter";
 import { SessionStateAdapter } from "../src/adapters/session-state.adapter";
 import { resolveHostPaths } from "../src/core/paths";
-import { PromptService } from "../src/core/prompt-service";
+import { PromptService, formatScope, resolveScope } from "../src/core/prompt-service";
 import { logger } from "../src/core/logger";
+import type { ActivePromptRef } from "../src/core/types/active-prompt-ref.type";
+import { PromptScope } from "../src/core/types/prompt-scope.type";
 import {
 	ExtensionCommand,
 	EXTENSION_COMMAND_CATALOG,
@@ -105,11 +107,16 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 			const files = await storage.list();
 			const paths = resolveHostPaths(ctx.cwd);
 
-			const activeList =
+			const activeList: ActivePromptRef[] =
 				config.activePrompts && config.activePrompts.length > 0
 					? config.activePrompts
 					: config.file
-						? [{ name: config.file, scope: config.scope ?? "global" }]
+						? [
+								{
+									name: config.file,
+									scope: resolveScope(config.scope, paths.host),
+								},
+							]
 						: [];
 
 			let activeSize = 0;
@@ -120,7 +127,7 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 
 			const promptFileLabel =
 				activeList.length > 0
-					? activeList.map((p) => `[${p.scope}] ${p.name}`).join(" + ")
+					? activeList.map((p) => `[${formatScope(p.scope)}] ${p.name}`).join(" + ")
 					: "(None / Default)";
 			const lines = [
 				"--- System Prompt Switch ---",
@@ -130,9 +137,10 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 				`Mode:             ${config.mode}`,
 				`Enabled:          ${config.enabled}`,
 				`Prompt Size:      ${activeSize} chars`,
-				`Global Directory: ${storage.getGlobalDirectory()}`,
+				`OMP Directory:    ${storage.getGlobalDirectory(PromptScope.GlobalOmp)}`,
+				`PI Directory:     ${storage.getGlobalDirectory(PromptScope.GlobalPi)}`,
 				`Local Directory:  ${storage.getLocalDirectory()}`,
-				`Available:        ${files.length > 0 ? files.map((f) => `[${f.scope}] ${f.name}`).join(", ") : "(none)"}`,
+				`Available:        ${files.length > 0 ? files.map((f) => `[${formatScope(f.scope)}] ${f.name}`).join(", ") : "(none)"}`,
 			];
 
 			ctx.ui.notify(lines.join("\n"), "info");

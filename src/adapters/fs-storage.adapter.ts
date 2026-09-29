@@ -2,23 +2,39 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHostPaths } from "../core/paths";
+import type { HostPlatform } from "../core/types/host-platform.type";
 import type { PromptFileInfo } from "../core/types/prompt-file-info.type";
-import type { PromptScope } from "../core/types/prompt-scope.type";
+import { globalScopeFor, PromptScope } from "../core/types/prompt-scope.type";
 import type { StoragePort } from "../ports/storage.port";
 
 export interface FsStorageOptions {
 	globalDir?: string;
+	ompGlobalDir?: string;
+	piGlobalDir?: string;
 	localDir?: string;
 	cwd?: string;
 }
 
 export class FsStorageAdapter implements StoragePort {
-	private globalDir: string;
+	private ompGlobalDir: string;
+	private piGlobalDir: string;
+	private detectedHost: HostPlatform;
 	private localDir: string;
 
 	constructor(options?: FsStorageOptions) {
 		const resolved = resolveHostPaths(options?.cwd);
-		this.globalDir = options?.globalDir ?? resolved.globalPromptDir;
+		this.detectedHost = resolved.host;
+		this.ompGlobalDir = options?.ompGlobalDir ?? resolved.ompGlobalPromptDir;
+		this.piGlobalDir = options?.piGlobalDir ?? resolved.piGlobalPromptDir;
+		// Legacy `globalDir` option maps onto the detected host so existing
+		// callers and tests keep working.
+		if (options?.globalDir !== undefined) {
+			if (resolved.host === "omp") {
+				this.ompGlobalDir = options.globalDir;
+			} else {
+				this.piGlobalDir = options.globalDir;
+			}
+		}
 		this.localDir = options?.localDir ?? resolved.localPromptDir;
 	}
 
@@ -27,8 +43,12 @@ export class FsStorageAdapter implements StoragePort {
 		this.localDir = resolved.localPromptDir;
 	}
 
-	getGlobalDirectory(): string {
-		return this.globalDir;
+	getGlobalDirectory(scope?: PromptScope): string {
+		if (scope === PromptScope.GlobalOmp) return this.ompGlobalDir;
+		if (scope === PromptScope.GlobalPi) return this.piGlobalDir;
+		return globalScopeFor(this.detectedHost) === PromptScope.GlobalOmp
+			? this.ompGlobalDir
+			: this.piGlobalDir;
 	}
 
 	getLocalDirectory(): string {
@@ -43,9 +63,10 @@ export class FsStorageAdapter implements StoragePort {
 
 	private migrateLegacyPromptsIfNeeded(): void {
 		try {
-			this.ensureDir(this.globalDir);
+			const targetDir = this.getGlobalDirectory();
+			this.ensureDir(targetDir);
 			const current = fs
-				.readdirSync(this.globalDir)
+				.readdirSync(targetDir)
 				.filter((f) => f.endsWith(".md"));
 			if (current.length > 0) {
 				return;
@@ -66,7 +87,7 @@ export class FsStorageAdapter implements StoragePort {
 				.filter((f) => f.endsWith(".md"));
 			for (const file of legacyFiles) {
 				const src = path.join(legacyDir, file);
-				const dest = path.join(this.globalDir, file);
+				const dest = path.join(targetDir, file);
 				if (!fs.existsSync(dest)) {
 					fs.copyFileSync(src, dest);
 				}
@@ -109,27 +130,30 @@ export class FsStorageAdapter implements StoragePort {
 	async list(): Promise<PromptFileInfo[]> {
 		this.migrateLegacyPromptsIfNeeded();
 
-		const localFiles = this.readDirFiles(this.localDir, "local");
-		const globalFiles = this.readDirFiles(this.globalDir, "global");
-
-		return [...localFiles, ...globalFiles];
+		return [
+			...this.readDirFiles(this.localDir, PromptScope.Local),
+			...this.readDirFiles(this.ompGlobalDir, PromptScope.GlobalOmp),
+			...this.readDirFiles(this.piGlobalDir, PromptScope.GlobalPi),
+		];
 	}
 
 	async read(name: string, scope?: PromptScope): Promise<string | null> {
 		const cleanName = path.basename(name);
 
-		if (scope === "local") {
+		if (scope === PromptScope.Local) {
 			return this.readFileFrom(path.join(this.localDir, cleanName));
 		}
-		if (scope === "global") {
-			return this.readFileFrom(path.join(this.globalDir, cleanName));
+		if (scope === PromptScope.GlobalOmp || scope === PromptScope.GlobalPi) {
+			return this.readFileFrom(path.join(this.getGlobalDirectory(scope), cleanName));
 		}
 
-		// If no scope specified, check local first, then global
+		// No scope: local first, then the detected host, then the other host.
 		const localContent = this.readFileFrom(path.join(this.localDir, cleanName));
 		if (localContent !== null) return localContent;
 
-		return this.readFileFrom(path.join(this.globalDir, cleanName));
+		return this.readFileFrom(
+			path.join(this.getGlobalDirectory(), cleanName),
+		);
 	}
 
 	private readFileFrom(filePath: string): string | null {
@@ -144,9 +168,10 @@ export class FsStorageAdapter implements StoragePort {
 	async write(
 		name: string,
 		content: string,
-		scope: PromptScope = "global",
+		scope: PromptScope = PromptScope.GlobalOmp,
 	): Promise<void> {
-		const targetDir = scope === "local" ? this.localDir : this.globalDir;
+		const targetDir =
+			scope === PromptScope.Local ? this.localDir : this.getGlobalDirectory(scope);
 		this.ensureDir(targetDir);
 		const fullPath = path.join(targetDir, path.basename(name));
 		fs.writeFileSync(fullPath, content, "utf-8");
@@ -155,18 +180,28 @@ export class FsStorageAdapter implements StoragePort {
 	async delete(name: string, scope?: PromptScope): Promise<boolean> {
 		const cleanName = path.basename(name);
 
-		if (scope === "local") {
+		if (scope === PromptScope.Local) {
 			return this.unlinkFile(path.join(this.localDir, cleanName));
 		}
-		if (scope === "global") {
-			return this.unlinkFile(path.join(this.globalDir, cleanName));
+		if (scope === PromptScope.GlobalOmp || scope === PromptScope.GlobalPi) {
+			return this.unlinkFile(path.join(this.getGlobalDirectory(scope), cleanName));
 		}
 
-		// Try local then global
-		const deletedLocal = this.unlinkFile(path.join(this.localDir, cleanName));
-		if (deletedLocal) return true;
-
-		return this.unlinkFile(path.join(this.globalDir, cleanName));
+		// No scope: local, then the detected host, then the other host.
+		if (this.unlinkFile(path.join(this.localDir, cleanName))) return true;
+		if (this.unlinkFile(path.join(this.getGlobalDirectory(), cleanName))) {
+			return true;
+		}
+		return this.unlinkFile(
+			path.join(
+				this.getGlobalDirectory(
+					globalScopeFor(this.detectedHost) === PromptScope.GlobalOmp
+					? PromptScope.GlobalPi
+					: PromptScope.GlobalOmp,
+				),
+				cleanName,
+			),
+		);
 	}
 
 	private unlinkFile(filePath: string): boolean {

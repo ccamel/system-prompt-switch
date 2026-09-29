@@ -1,23 +1,29 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { HostPaths } from "./types/host-paths.type";
-import type { HostPlatform } from "./types/host-platform.type";
+import { HostPlatform } from "./types/host-platform.type";
 
 export function detectHost(
 	env: Record<string, string | undefined> = process.env,
 	argv: string[] = process.argv,
 ): HostPlatform {
+	// Explicit override wins over every heuristic, so a misdetected host is
+	// always recoverable without editing code.
+	const forced = env.SPS_HOST?.trim().toLowerCase();
+	if (forced === HostPlatform.Omp || forced === HostPlatform.Pi) {
+		return forced;
+	}
 	if (env.OMPCODE === "1") {
-		return "omp";
+		return HostPlatform.Omp;
 	}
 	const hasOmpInArgv = argv.some((arg) => {
 		const base = path.basename(arg);
-		return base === "omp" || base.startsWith("omp-");
+		return base === HostPlatform.Omp || base.startsWith("omp-");
 	});
 	if (hasOmpInArgv) {
-		return "omp";
+		return HostPlatform.Omp;
 	}
-	return "pi";
+	return HostPlatform.Pi;
 }
 
 export function resolveHostPaths(
@@ -29,15 +35,18 @@ export function resolveHostPaths(
 	const home = os.homedir();
 
 	const envGlobalDir = env.SPS_PROMPT_DIR?.trim() || env.SYSTEM_PROMPT_DIR?.trim();
-	const globalPromptDir =
-		envGlobalDir && envGlobalDir.length > 0
+	// ponytail: both host dirs are always resolved. A shared SPS_PROMPT_DIR
+	// override applies to the detected host only, so the other host keeps its
+	// own real location instead of silently sharing one.
+	const ompGlobalPromptDir =
+		host === "omp" && envGlobalDir
 			? envGlobalDir
-			: path.join(
-					home,
-					host === "omp" ? ".omp" : ".pi",
-					"agent",
-					"system-prompts-switch",
-				);
+			: path.join(home, ".omp", "agent", "system-prompts-switch");
+	const piGlobalPromptDir =
+		host === "pi" && envGlobalDir
+			? envGlobalDir
+			: path.join(home, ".pi", "agent", "system-prompts-switch");
+	const globalPromptDir = host === "omp" ? ompGlobalPromptDir : piGlobalPromptDir;
 
 	const envLocalDir = env.SPS_LOCAL_PROMPT_DIR?.trim();
 	const localPromptDir =
@@ -62,6 +71,8 @@ export function resolveHostPaths(
 	return {
 		host,
 		globalPromptDir,
+		ompGlobalPromptDir,
+		piGlobalPromptDir,
 		localPromptDir,
 		statePath,
 	};

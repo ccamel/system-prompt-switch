@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { NONE_OPTION, PromptService } from "../../src/core/prompt-service";
 import type { PromptFileInfo } from "../../src/core/types/prompt-file-info.type";
-import type { PromptScope } from "../../src/core/types/prompt-scope.type";
+import { PromptScope } from "../../src/core/types/prompt-scope.type";
 import type { SessionPromptConfig } from "../../src/core/types/session-prompt-config.type";
 import type { SessionStatePort } from "../../src/ports/session-state.port";
 import type { StoragePort } from "../../src/ports/storage.port";
@@ -9,7 +9,9 @@ import type { UIPort } from "../../src/ports/ui.port";
 
 class MockStorage implements StoragePort {
 	localFiles = new Map<string, string>();
+	/** Backed by the detected host (omp in this repo's dev env). */
 	globalFiles = new Map<string, string>();
+	piFiles = new Map<string, string>();
 
 	get files(): Map<string, string> {
 		return this.globalFiles;
@@ -19,42 +21,67 @@ class MockStorage implements StoragePort {
 		const locals = Array.from(this.localFiles.entries()).map(([name, content]) => ({
 			name,
 			path: `/prompts/local/${name}`,
-			scope: "local" as PromptScope,
+			scope: PromptScope.Local as PromptScope,
 			sizeChars: content.length,
 			modifiedAt: 1000,
 		}));
-		const globals = Array.from(this.globalFiles.entries()).map(([name, content]) => ({
-			name,
-			path: `/prompts/global/${name}`,
-			scope: "global" as PromptScope,
-			sizeChars: content.length,
-			modifiedAt: 1000,
-		}));
-		return [...locals, ...globals];
+		const ompGlobals = Array.from(this.globalFiles.entries()).map(
+			([name, content]) => ({
+				name,
+				path: `/prompts/global-omp/${name}`,
+				scope: PromptScope.GlobalOmp as PromptScope,
+				sizeChars: content.length,
+				modifiedAt: 1000,
+			}),
+		);
+		const piGlobals = Array.from(this.piFiles.entries()).map(
+			([name, content]) => ({
+				name,
+				path: `/prompts/global-pi/${name}`,
+				scope: "global-pi" as PromptScope,
+				sizeChars: content.length,
+				modifiedAt: 1000,
+			}),
+		);
+		return [...locals, ...ompGlobals, ...piGlobals];
 	}
 
 	async read(name: string, scope?: PromptScope): Promise<string | null> {
 		if (scope === "local") return this.localFiles.get(name) ?? null;
-		if (scope === "global") return this.globalFiles.get(name) ?? null;
-		return this.localFiles.get(name) ?? this.globalFiles.get(name) ?? null;
+		if (scope === "global-pi") return this.piFiles.get(name) ?? null;
+		if (scope === "global-omp") return this.globalFiles.get(name) ?? null;
+		return (
+			this.localFiles.get(name) ??
+			this.globalFiles.get(name) ??
+			this.piFiles.get(name) ??
+			null
+		);
 	}
 
-	async write(name: string, content: string, scope: PromptScope = "global"): Promise<void> {
-		if (scope === "local") {
-			this.localFiles.set(name, content);
-		} else {
-			this.globalFiles.set(name, content);
-		}
+	async write(
+		name: string,
+		content: string,
+		scope: PromptScope = PromptScope.GlobalOmp,
+	): Promise<void> {
+		if (scope === PromptScope.Local) this.localFiles.set(name, content);
+		else if (scope === "global-pi") this.piFiles.set(name, content);
+		else this.globalFiles.set(name, content);
 	}
 
 	async delete(name: string, scope?: PromptScope): Promise<boolean> {
 		if (scope === "local") return this.localFiles.delete(name);
-		if (scope === "global") return this.globalFiles.delete(name);
-		return this.localFiles.delete(name) || this.globalFiles.delete(name);
+		if (scope === "global-pi") return this.piFiles.delete(name);
+		if (scope === "global-omp") return this.globalFiles.delete(name);
+		return (
+			this.localFiles.delete(name) ||
+			this.globalFiles.delete(name) ||
+			this.piFiles.delete(name)
+		);
 	}
 
-	getGlobalDirectory(): string {
-		return "/prompts/global";
+	getGlobalDirectory(scope?: PromptScope): string {
+		if (scope === "global-pi") return "/prompts/global-pi";
+		return "/prompts/global-omp";
 	}
 
 	getLocalDirectory(): string {
@@ -164,19 +191,19 @@ describe("PromptService", () => {
 
 	it("selects a file when chosen in selectPrompt", async () => {
 		storage.files.set("reviewer.md", "You are a reviewer.");
-		ui.selectChoice = "[global] reviewer.md";
+		ui.selectChoice = "[omp] reviewer.md";
 
 		const result = await service.selectPrompt("sess-1");
 		expect(result).toBe("reviewer.md");
 
 		const updated = await service.getCurrentConfig("sess-1");
 		expect(updated.file).toBe("reviewer.md");
-		expect(ui.currentWidget?.[0]).toContain("[global] reviewer.md (append mode)");
+		expect(ui.currentWidget?.[0]).toContain("[omp] reviewer.md (append mode)");
 	});
 
 	it("creates a new prompt and can activate it for session", async () => {
 		ui.inputValue = "security-auditor";
-		ui.selectChoices = ["[global] User home (~/.omp or ~/.pi)"];
+		ui.selectChoices = ["[omp] User home (~/.omp or ~/.pi)"];
 		ui.editorValue = "Audit for vulnerabilities.";
 		const result = await service.createNewPrompt("sess-1");
 		expect(result).toBe("security-auditor.md");
@@ -259,7 +286,7 @@ describe("PromptService", () => {
 			mode: "append",
 			enabled: true,
 		});
-		ui.selectChoice = "[global] temp.md";
+		ui.selectChoice = "[omp] temp.md";
 		ui.confirmValue = true;
 
 		const success = await service.deletePrompt("sess-1");
@@ -295,7 +322,7 @@ describe("PromptService", () => {
 		});
 		expect(result).toContain("Base prompt");
 		expect(result).toContain("System Prompt Switch (extension context)");
-		expect(result).toContain("### [global] pirate.md");
+		expect(result).toContain("### [omp] pirate.md");
 		expect(result).toContain("Speak like a pirate captain.");
 	});
 
@@ -304,19 +331,19 @@ describe("PromptService", () => {
 		storage.files.set("prompt2.md", "Prompt 2 content");
 
 		// Inject first prompt
-		ui.selectChoices = ["[global] prompt1.md"];
+		ui.selectChoices = ["[omp] prompt1.md"];
 		await service.injectPrompt("sess-1");
 
 		let config = await service.getCurrentConfig("sess-1");
 		expect(config.activePrompts.length).toBe(1);
 
 		// Inject second prompt
-		ui.selectChoices = ["[global] prompt2.md"];
+		ui.selectChoices = ["[omp] prompt2.md"];
 		await service.injectPrompt("sess-1");
 
 		config = await service.getCurrentConfig("sess-1");
 		expect(config.activePrompts.length).toBe(2);
-		expect(ui.currentWidget?.[0]).toContain("Active Prompt: [global] prompt1.md (append mode)");
+		expect(ui.currentWidget?.[0]).toContain("Active Prompt: [omp] prompt1.md (append mode)");
 
 		// Resolves turn with both prompts combined
 		const result = await service.resolvePromptForTurn("sess-1", {
@@ -331,29 +358,29 @@ describe("PromptService", () => {
 		storage.localFiles.set("b.md", "Local B");
 		await sessionState.setSessionConfig("sess-1", {
 			file: "b.md",
-			scope: "local",
-			activePrompts: [{ name: "b.md", scope: "local" }],
+			scope: PromptScope.Local,
+			activePrompts: [{ name: "b.md", scope: PromptScope.Local }],
 			mode: "append",
 			enabled: true,
 		});
 
-		ui.selectChoices = ["[global] b.md"];
+		ui.selectChoices = ["[omp] b.md"];
 		await service.injectPrompt("sess-1");
 
 		const config = await service.getCurrentConfig("sess-1");
 		expect(config.activePrompts).toEqual([
-			{ name: "b.md", scope: "local" },
-			{ name: "b.md", scope: "global", injected: true },
+			{ name: "b.md", scope: PromptScope.Local },
+			{ name: "b.md", scope: PromptScope.GlobalOmp, injected: true },
 		]);
 		expect(config.file).toBe("b.md");
-		expect(config.scope).toBe("local");
+		expect(config.scope).toBe(PromptScope.Local);
 	});
 
 	it("does not toggle off the primary in inject modal", async () => {
 		await sessionState.setSessionConfig("sess-1", {
 			file: "b.md",
-			scope: "local",
-			activePrompts: [{ name: "b.md", scope: "local" }],
+			scope: PromptScope.Local,
+			activePrompts: [{ name: "b.md", scope: PromptScope.Local }],
 			mode: "append",
 			enabled: true,
 		});
@@ -364,10 +391,10 @@ describe("PromptService", () => {
 
 		const config = await service.getCurrentConfig("sess-1");
 		expect(config.activePrompts).toEqual([
-			{ name: "b.md", scope: "local" },
+			{ name: "b.md", scope: PromptScope.Local },
 		]);
 		expect(config.file).toBe("b.md");
-		expect(config.scope).toBe("local");
+		expect(config.scope).toBe(PromptScope.Local);
 		expect(
 			ui.notifications.some((n) =>
 				n.message.toLowerCase().includes("primary"),
@@ -380,24 +407,24 @@ describe("PromptService", () => {
 		storage.localFiles.set("b.md", "Local B");
 		await sessionState.setSessionConfig("sess-1", {
 			file: "b.md",
-			scope: "local",
+			scope: PromptScope.Local,
 			activePrompts: [
-				{ name: "b.md", scope: "local" },
-				{ name: "a.md", scope: "global" },
+				{ name: "b.md", scope: PromptScope.Local },
+				{ name: "a.md", scope: PromptScope.GlobalOmp },
 			],
 			mode: "append",
 			enabled: true,
 		});
 
-		ui.selectChoices = ["[global] a.md [INJECTED] ✓"];
+		ui.selectChoices = ["[omp] a.md [INJECTED] ✓"];
 		await service.injectPrompt("sess-1");
 
 		const config = await service.getCurrentConfig("sess-1");
 		expect(config.activePrompts).toEqual([
-			{ name: "b.md", scope: "local" },
+			{ name: "b.md", scope: PromptScope.Local },
 		]);
 		expect(config.file).toBe("b.md");
-		expect(config.scope).toBe("local");
+		expect(config.scope).toBe(PromptScope.Local);
 	});
 
 	it("does not change primary when injecting on a stack that already has one", async () => {
@@ -405,22 +432,22 @@ describe("PromptService", () => {
 		storage.localFiles.set("b.md", "Local B");
 		await sessionState.setSessionConfig("sess-1", {
 			file: "b.md",
-			scope: "local",
-			activePrompts: [{ name: "b.md", scope: "local" }],
+			scope: PromptScope.Local,
+			activePrompts: [{ name: "b.md", scope: PromptScope.Local }],
 			mode: "append",
 			enabled: true,
 		});
 
-		ui.selectChoices = ["[global] a.md"];
+		ui.selectChoices = ["[omp] a.md"];
 		await service.injectPrompt("sess-1");
 
 		const config = await service.getCurrentConfig("sess-1");
 		expect(config.activePrompts).toEqual([
-			{ name: "b.md", scope: "local" },
-			{ name: "a.md", scope: "global", injected: true },
+			{ name: "b.md", scope: PromptScope.Local },
+			{ name: "a.md", scope: PromptScope.GlobalOmp, injected: true },
 		]);
 		expect(config.file).toBe("b.md");
-		expect(config.scope).toBe("local");
+		expect(config.scope).toBe(PromptScope.Local);
 	});
 
 	it("marks entries pushed by injectPrompt with injected: true", async () => {
@@ -428,31 +455,31 @@ describe("PromptService", () => {
 		storage.files.set("b.md", "B extra");
 		await sessionState.setSessionConfig("sess-1", {
 			file: "a.md",
-			scope: "global",
-			activePrompts: [{ name: "a.md", scope: "global" }],
+			scope: PromptScope.GlobalOmp,
+			activePrompts: [{ name: "a.md", scope: PromptScope.GlobalOmp }],
 			mode: "append",
 			enabled: true,
 		});
 
-		ui.selectChoices = ["[global] b.md"];
+		ui.selectChoices = ["[omp] b.md"];
 		await service.injectPrompt("sess-1");
 
 		const config = await service.getCurrentConfig("sess-1");
 		const ref = config.activePrompts.find(
-			(p) => p.name === "b.md" && p.scope === "global",
+			(p) => p.name === "b.md" && p.scope === PromptScope.GlobalOmp,
 		);
 		expect(ref?.injected).toBe(true);
 	});
 
 	it("does not mark the primary as injected when selectPrompt sets it", async () => {
 		storage.files.set("a.md", "A");
-		ui.selectChoice = "[global] a.md";
+		ui.selectChoice = "[omp] a.md";
 
 		await service.selectPrompt("sess-sel");
 
 		const config = await service.getCurrentConfig("sess-sel");
 		expect(config.activePrompts).toEqual([
-			{ name: "a.md", scope: "global" },
+			{ name: "a.md", scope: PromptScope.GlobalOmp },
 		]);
 		expect(config.activePrompts[0].injected).toBeUndefined();
 	});
@@ -462,10 +489,10 @@ describe("PromptService", () => {
 		storage.files.set("c.md", "C content");
 		await sessionState.setSessionConfig("sess-resolve", {
 			file: "b.md",
-			scope: "global",
+			scope: PromptScope.GlobalOmp,
 			activePrompts: [
-				{ name: "b.md", scope: "global" },
-				{ name: "c.md", scope: "global", injected: true },
+				{ name: "b.md", scope: PromptScope.GlobalOmp },
+				{ name: "c.md", scope: PromptScope.GlobalOmp, injected: true },
 			],
 			mode: "append",
 			enabled: true,
@@ -479,7 +506,7 @@ describe("PromptService", () => {
 
 		const config = await service.getCurrentConfig("sess-resolve");
 		expect(config.activePrompts).toEqual([
-			{ name: "b.md", scope: "global" },
+			{ name: "b.md", scope: PromptScope.GlobalOmp },
 		]);
 
 		const nextResult = await service.resolvePromptForTurn("sess-resolve", {
@@ -494,10 +521,10 @@ describe("PromptService", () => {
 		storage.files.set("c.md", "C content");
 		await sessionState.setSessionConfig("sess-widget", {
 			file: "b.md",
-			scope: "global",
+			scope: PromptScope.GlobalOmp,
 			activePrompts: [
-				{ name: "b.md", scope: "global" },
-				{ name: "c.md", scope: "global", injected: true },
+				{ name: "b.md", scope: PromptScope.GlobalOmp },
+				{ name: "c.md", scope: PromptScope.GlobalOmp, injected: true },
 			],
 			mode: "append",
 			enabled: true,
@@ -506,7 +533,7 @@ describe("PromptService", () => {
 		await service.updateStatus("sess-widget");
 
 		expect(ui.currentWidget?.[0]).toContain(
-			"Active Prompt: [global] b.md (append mode)",
+			"Active Prompt: [omp] b.md (append mode)",
 		);
 		expect(ui.currentWidget?.[0]).not.toContain("c.md");
 		expect(ui.currentWidget?.[0]).not.toContain("extra");
@@ -534,8 +561,8 @@ describe("PromptService", () => {
 		storage.files.set("beh.md", "BEH content");
 		await sessionState.setSessionConfig("sess-ctx-active", {
 			file: "beh.md",
-			scope: "global",
-			activePrompts: [{ name: "beh.md", scope: "global" }],
+			scope: PromptScope.GlobalOmp,
+			activePrompts: [{ name: "beh.md", scope: PromptScope.GlobalOmp }],
 			mode: "append",
 			enabled: true,
 		});
@@ -546,7 +573,7 @@ describe("PromptService", () => {
 
 		expect(result).toContain("Base prompt.");
 		expect(result).toContain("System Prompt Switch");
-		expect(result).toContain("[global] beh.md");
+		expect(result).toContain("[omp] beh.md");
 		expect(result).toContain("BEH content");
 	});
 
@@ -593,14 +620,14 @@ describe("PromptService", () => {
 
 	it("BUG 1: records decided=true after picking a prompt from the modal", async () => {
 		storage.files.set("beh.md", "BEH content");
-		ui.selectChoices = ["[global] beh.md"];
+		ui.selectChoices = ["[omp] beh.md"];
 
 		await service.promptNewSessionModal("sess-dismiss-pick");
 
 		const config = await service.getCurrentConfig("sess-dismiss-pick");
 		expect(config.decided).toBe(true);
 		expect(config.activePrompts).toEqual([
-			{ name: "beh.md", scope: "global" },
+			{ name: "beh.md", scope: PromptScope.GlobalOmp },
 		]);
 	});
 
@@ -608,8 +635,8 @@ describe("PromptService", () => {
 		storage.files.set("beh.md", "BEH content");
 		await sessionState.setSessionConfig("sess-decided-prompt", {
 			file: "beh.md",
-			scope: "global",
-			activePrompts: [{ name: "beh.md", scope: "global" }],
+			scope: PromptScope.GlobalOmp,
+			activePrompts: [{ name: "beh.md", scope: PromptScope.GlobalOmp }],
 			mode: "append",
 			enabled: true,
 			decided: true,
@@ -619,7 +646,7 @@ describe("PromptService", () => {
 
 		expect(ui.selectCalls).toBe(0);
 		expect(ui.currentWidget?.[0]).toContain(
-			"Active Prompt: [global] beh.md (append mode)",
+			"Active Prompt: [omp] beh.md (append mode)",
 		);
 	});
 
@@ -630,7 +657,7 @@ describe("PromptService", () => {
 		ui.selectChoices = ["1. Built-in terminal editor"];
 		ui.editorValue = "Local specific guidelines";
 
-		const result = await service.createNewPrompt("sess-col-1", "local");
+		const result = await service.createNewPrompt("sess-col-1", PromptScope.Local);
 		expect(result).toBe("guidelines.md");
 		expect(storage.localFiles.get("guidelines.md")).toBe("Local specific guidelines");
 		expect(storage.globalFiles.get("guidelines.md")).toBe("Global guidelines");
@@ -640,7 +667,7 @@ describe("PromptService", () => {
 		storage.localFiles.set("duplicate.md", "Existing local content");
 
 		ui.inputValue = "duplicate";
-		const result = await service.createNewPrompt("sess-col-2", "local");
+		const result = await service.createNewPrompt("sess-col-2", PromptScope.Local);
 		expect(result).toBeNull();
 		const lastNotification = ui.notifications[ui.notifications.length - 1];
 		expect(lastNotification.message).toContain("already exists in local scope");
@@ -650,10 +677,10 @@ describe("PromptService", () => {
 		storage.globalFiles.set("duplicate.md", "Existing global content");
 
 		ui.inputValue = "duplicate";
-		const result = await service.createNewPrompt("sess-col-3", "global");
+		const result = await service.createNewPrompt("sess-col-3", PromptScope.GlobalOmp);
 		expect(result).toBeNull();
 		const lastNotification = ui.notifications[ui.notifications.length - 1];
-		expect(lastNotification.message).toContain("already exists in global scope");
+		expect(lastNotification.message).toContain("already exists in omp scope");
 	});
 
 	it("accepts a hyphenated name and auto-appends .md", async () => {
@@ -661,7 +688,7 @@ describe("PromptService", () => {
 		ui.selectChoices = ["1. Built-in terminal editor"];
 		ui.editorValue = "body";
 
-		const result = await service.createNewPrompt("sess-name-1", "global");
+		const result = await service.createNewPrompt("sess-name-1", PromptScope.GlobalOmp);
 		expect(result).toBe("Backend-Dev.md");
 		expect(storage.globalFiles.get("Backend-Dev.md")).toBe("body");
 	});
@@ -671,7 +698,7 @@ describe("PromptService", () => {
 		ui.selectChoices = ["1. Built-in terminal editor"];
 		ui.editorValue = "body";
 
-		const result = await service.createNewPrompt("sess-name-1b", "global");
+		const result = await service.createNewPrompt("sess-name-1b", PromptScope.GlobalOmp);
 		expect(result).toBe("Backend-Dev.md");
 		expect(storage.globalFiles.get("Backend-Dev.md")).toBe("body");
 		expect(storage.globalFiles.has("Test test.md")).toBe(false);
@@ -687,7 +714,7 @@ describe("PromptService", () => {
 		ui.selectChoices = ["1. Built-in terminal editor"];
 		ui.editorValue = "body";
 
-		const result = await service.createNewPrompt("sess-name-2", "global");
+		const result = await service.createNewPrompt("sess-name-2", PromptScope.GlobalOmp);
 		expect(result).toBe("ok-name.md");
 		expect(storage.globalFiles.get("ok-name.md")).toBe("body");
 
@@ -702,7 +729,7 @@ describe("PromptService", () => {
 		ui.selectChoices = ["1. Built-in terminal editor"];
 		ui.editorValue = "body";
 
-		const result = await service.createNewPrompt("sess-name-3", "global");
+		const result = await service.createNewPrompt("sess-name-3", PromptScope.GlobalOmp);
 		expect(result).toBe("valid.md");
 		expect(storage.globalFiles.get("valid.md")).toBe("body");
 
@@ -718,8 +745,8 @@ describe("PromptService", () => {
 
 		await sessionState.setSessionConfig("sess-paths", {
 			file: "local-prompt.md",
-			scope: "local",
-			activePrompts: [{ name: "local-prompt.md", scope: "local" }],
+			scope: PromptScope.Local,
+			activePrompts: [{ name: "local-prompt.md", scope: PromptScope.Local }],
 			mode: "append",
 			enabled: true,
 		});
@@ -730,10 +757,11 @@ describe("PromptService", () => {
 		expect(text).toContain("Active Prompt:");
 		expect(text).toContain("[local] /prompts/local/local-prompt.md");
 		expect(text).toContain("Directories:");
-		expect(text).toContain("Local:  /prompts/local");
-		expect(text).toContain("Global: /prompts/global");
+		expect(text).toContain("Local: /prompts/local");
+		expect(text).toContain("OMP:   /prompts/global-omp");
+		expect(text).toContain("PI:    /prompts/global-pi");
 		expect(text).toContain("All Available Prompts:");
 		expect(text).toContain("/prompts/local/local-prompt.md");
-		expect(text).toContain("/prompts/global/global-prompt.md");
+		expect(text).toContain("/prompts/global-omp/global-prompt.md");
 	});
 });

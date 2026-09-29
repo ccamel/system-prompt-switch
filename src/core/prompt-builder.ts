@@ -1,3 +1,4 @@
+import { formatScope } from "./prompt-scope-label";
 import type { BuildPromptInput } from "./types/build-prompt-input.type";
 import type { SkillItem } from "./types/skill-item.type";
 
@@ -39,7 +40,7 @@ export function buildSystemPrompt(input: BuildPromptInput): string {
 			const trimmed = chunk.content.trim();
 			if (trimmed.length > 0) {
 				const header = chunk.name
-					? `### [${chunk.scope ?? "global"}] ${chunk.name}\n\n`
+					? `### [${formatScope(chunk.scope ?? "global-omp")}] ${chunk.name}\n\n`
 					: "";
 				chunks.push(`${header}${trimmed}`);
 			}

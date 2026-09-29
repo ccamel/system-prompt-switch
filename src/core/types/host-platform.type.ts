@@ -1,1 +1,4 @@
-export type HostPlatform = "omp" | "pi";
+export enum HostPlatform {
+	Omp = "omp",
+	Pi = "pi",
+}

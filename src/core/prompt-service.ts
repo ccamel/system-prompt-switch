@@ -2,14 +2,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { logger } from "./logger";
+import { detectHost } from "./paths";
 import { buildSystemPrompt } from "./prompt-builder";
+import { formatScope, resolveScope, SCOPE_BY_LABEL } from "./prompt-scope-label";
 import type { ActivePromptRef } from "./types/active-prompt-ref.type";
+import type { HostPlatform } from "./types/host-platform.type";
 import type {
 	BuildPromptInput,
 	CustomPromptChunk,
 } from "./types/build-prompt-input.type";
 import type { MergeMode } from "./types/merge-mode.type";
-import type { PromptScope } from "./types/prompt-scope.type";
+import { globalScopeFor, PromptScope } from "./types/prompt-scope.type";
 import type { SessionPromptConfig } from "./types/session-prompt-config.type";
 import type { SessionStatePort } from "../ports/session-state.port";
 import type { StoragePort } from "../ports/storage.port";
@@ -17,8 +20,12 @@ import type { UIPort } from "../ports/ui.port";
 
 export const NONE_OPTION = "(None / Default)";
 export const CREATE_NEW_OPTION = "+ Create new prompt...";
-export const CREATE_NEW_GLOBAL_OPTION = "+ Create new [global] prompt (~/.omp or ~/.pi)";
+export const CREATE_NEW_OMP_OPTION = "+ Create new [omp] prompt (~/.omp/agent/...)";
+export const CREATE_NEW_PI_OPTION = "+ Create new [pi] prompt (~/.pi/agent/...)";
 export const CREATE_NEW_LOCAL_OPTION = "+ Create new [local] prompt (.agents/...)";
+
+/** Short labels shown in the modals. */
+export { SCOPE_BY_LABEL, formatScope, resolveScope } from "./prompt-scope-label";
 
 // ponytail: the host's editor footer advertises Ctrl+Enter submit + Ctrl+G external editor,
 // which we cannot suppress from extension code. Show our own banner above the editor instead.
@@ -69,7 +76,7 @@ function renderExtensionContext(
 ): string {
 	const activeLine =
 		activePrompts.length > 0
-			? activePrompts.map((p) => `[${p.scope}] ${p.name}`).join(", ")
+			? activePrompts.map((p) => `[${formatScope(p.scope)}] ${p.name}`).join(", ")
 			: "(none)";
 	return template
 		.replaceAll("{activePrompts}", activeLine)
@@ -81,25 +88,33 @@ export interface ResolvedSessionPromptConfig extends SessionPromptConfig {
 }
 
 export class PromptService {
+	private readonly host: HostPlatform;
+
 	constructor(
 		private readonly storage: StoragePort,
 		private readonly sessionState: SessionStatePort,
 		private readonly ui: UIPort,
-	) {}
+	) {
+		this.host = detectHost();
+	}
 
 	async getCurrentConfig(sessionId: string): Promise<ResolvedSessionPromptConfig> {
 		const existing = await this.sessionState.getSessionConfig(sessionId);
 		if (existing) {
-			const activePrompts =
+			// Scopes are already host-explicit: SessionStateAdapter migrates any
+			// legacy bare "global" on read, so nothing to resolve here.
+			const activePrompts: ActivePromptRef[] =
 				existing.activePrompts && existing.activePrompts.length > 0
 					? existing.activePrompts
 					: existing.file
-						? [{ name: existing.file, scope: existing.scope ?? "global" }]
+						? [
+								{
+									name: existing.file,
+									scope: existing.scope ?? globalScopeFor(this.host),
+								},
+							]
 						: [];
-			return {
-				...existing,
-				activePrompts,
-			};
+			return { ...existing, activePrompts };
 		}
 		const fallback: ResolvedSessionPromptConfig = {
 			file: null,
@@ -126,7 +141,7 @@ export class PromptService {
 		const activeList = config.activePrompts;
 		const primary = activeList[0];
 		const label = primary
-			? `[${primary.scope}] ${primary.name}`
+			? `[${formatScope(primary.scope)}] ${primary.name}`
 			: "(none)";
 
 		this.ui.setWidget([
@@ -157,14 +172,18 @@ export class PromptService {
 		if (
 			clean === NONE_OPTION ||
 			clean === CREATE_NEW_OPTION ||
-			clean === CREATE_NEW_GLOBAL_OPTION ||
+			clean === CREATE_NEW_OMP_OPTION ||
+			clean === CREATE_NEW_PI_OPTION ||
 			clean === CREATE_NEW_LOCAL_OPTION
 		) {
 			return { name: clean };
 		}
-		const match = clean.match(/^\[(local|global)\]\s+(.+)$/);
+		const match = clean.match(/^\[(local|omp|pi)\]\s+(.+)$/);
 		if (match) {
-			return { name: match[2].trim(), scope: match[1] as PromptScope };
+			return {
+				name: match[2].trim(),
+				scope: SCOPE_BY_LABEL[match[1] as keyof typeof SCOPE_BY_LABEL],
+			};
 		}
 		return { name: clean };
 	}
@@ -177,11 +196,12 @@ export class PromptService {
 			config.file === null && config.activePrompts.length === 0
 				? `${NONE_OPTION}  ✓`
 				: NONE_OPTION,
-			CREATE_NEW_GLOBAL_OPTION,
+			CREATE_NEW_OMP_OPTION,
+			CREATE_NEW_PI_OPTION,
 			CREATE_NEW_LOCAL_OPTION,
 		];
 		for (const file of files) {
-			const formatted = `[${file.scope}] ${file.name}`;
+			const formatted = `[${formatScope(file.scope)}] ${file.name}`;
 			const isSelected =
 				file.name === config.file && (!config.scope || config.scope === file.scope);
 			options.push(isSelected ? `${formatted}  ✓` : formatted);
@@ -194,14 +214,14 @@ export class PromptService {
 		if (!choice) return undefined;
 
 		const cleanChoice = choice.replace(/\s+✓$/, "").trim();
-		if (
-			cleanChoice === CREATE_NEW_GLOBAL_OPTION ||
-			cleanChoice === CREATE_NEW_OPTION
-		) {
-			return this.createNewPrompt(sessionId, "global");
+		if (cleanChoice === CREATE_NEW_OMP_OPTION || cleanChoice === CREATE_NEW_OPTION) {
+			return this.createNewPrompt(sessionId, PromptScope.GlobalOmp);
+		}
+		if (cleanChoice === CREATE_NEW_PI_OPTION) {
+			return this.createNewPrompt(sessionId, PromptScope.GlobalPi);
 		}
 		if (cleanChoice === CREATE_NEW_LOCAL_OPTION) {
-			return this.createNewPrompt(sessionId, "local");
+			return this.createNewPrompt(sessionId, PromptScope.Local);
 		}
 
 		const parsed = this.parseOption(choice);
@@ -220,11 +240,10 @@ export class PromptService {
 			return null;
 		}
 
+		const selectedScope = resolveScope(parsed.scope, this.host);
 		config.file = parsed.name;
-		config.scope = parsed.scope;
-		config.activePrompts = [
-			{ name: parsed.name, scope: parsed.scope ?? "global" },
-		];
+		config.scope = selectedScope;
+		config.activePrompts = [{ name: parsed.name, scope: selectedScope }];
 		config.enabled = true;
 		config.decided = true;
 		await this.sessionState.setSessionConfig(sessionId, config);
@@ -266,7 +285,7 @@ export class PromptService {
 			} else if (isPromptActive(file.name, file.scope)) {
 				tag = " [INJECTED] ✓";
 			}
-			options.push(`[${file.scope}] ${file.name}${tag}`);
+			options.push(`[${formatScope(file.scope)}] ${file.name}${tag}`);
 		}
 
 		const choice = await this.ui.select(
@@ -298,7 +317,7 @@ export class PromptService {
 			choice.replace(/\s+\[(INJECTED|SELECTED)\]\s+✓$/, ""),
 		);
 		const targetName = parsed.name;
-		const targetScope = parsed.scope ?? "global";
+		const targetScope = resolveScope(parsed.scope, this.host);
 
 		const existingIndex = config.activePrompts.findIndex(
 			(p) => p.name === targetName && p.scope === targetScope,
@@ -312,7 +331,7 @@ export class PromptService {
 			// or to none, which surprised users.
 			if (config.file === targetName && config.scope === targetScope) {
 				this.ui.notify(
-					`[${targetScope}] "${targetName}" is your active primary. Use /sps-select to change it.`,
+					`[${formatScope(targetScope)}] "${targetName}" is your active primary. Use /sps-select to change it.`,
 					"info",
 				);
 				return;
@@ -325,7 +344,7 @@ export class PromptService {
 				targetScope,
 			});
 			this.ui.notify(
-				`Removed [${targetScope}] "${targetName}". Total active: ${config.activePrompts.length}. Takes effect on your next message.`,
+				`Removed [${formatScope(targetScope)}] "${targetName}". Total active: ${config.activePrompts.length}. Takes effect on your next message.`,
 				"info",
 			);
 		} else {
@@ -410,17 +429,22 @@ export class PromptService {
 		}
 
 		// Determine target scope
-		let targetScope: PromptScope = preselectedScope ?? "global";
+		let targetScope: PromptScope = preselectedScope ?? globalScopeFor(this.host);
 		if (!preselectedScope && this.ui.hasUI()) {
 			const scopeChoice = await this.ui.select(
 				"Choose destination for new prompt:",
 				[
-					"[global] User home (~/.omp or ~/.pi)",
+					"[omp] User home (~/.omp/agent/system-prompts-switch/)",
+					"[pi] User home (~/.pi/agent/system-prompts-switch/)",
 					"[local] Current repo (.agents/system-prompts-switch/)",
 				],
 			);
-			if (scopeChoice && scopeChoice.includes("local")) {
-				targetScope = "local";
+			if (scopeChoice?.startsWith("[local]")) {
+				targetScope = PromptScope.Local;
+			} else if (scopeChoice?.startsWith("[pi]")) {
+				targetScope = PromptScope.GlobalPi;
+			} else {
+				targetScope = PromptScope.GlobalOmp;
 			}
 		}
 
@@ -428,7 +452,7 @@ export class PromptService {
 		const existing = await this.storage.read(cleanName, targetScope);
 		if (existing !== null) {
 			this.ui.notify(
-				`Prompt "${cleanName}" already exists in ${targetScope} scope!`,
+				`Prompt "${cleanName}" already exists in ${formatScope(targetScope)} scope!`,
 				"error",
 			);
 			return null;
@@ -450,7 +474,7 @@ export class PromptService {
 		await this.storage.write(cleanName, updated, targetScope);
 
 		const targetDir =
-			targetScope === "local"
+			targetScope === PromptScope.Local
 				? this.storage.getLocalDirectory()
 				: this.storage.getGlobalDirectory();
 		const fullPath = path.join(targetDir, cleanName);
@@ -493,12 +517,12 @@ export class PromptService {
 
 		const config = await this.getCurrentConfig(sessionId);
 		let targetFile: string | undefined = config.file ?? undefined;
-		let targetScope: PromptScope | undefined = config.scope;
+		let targetScope: PromptScope | "global" | undefined = config.scope;
 
 		if (!targetFile || !files.some((f) => f.name === targetFile)) {
 			const choice = await this.ui.select(
 				"Select prompt to edit",
-				files.map((f) => `[${f.scope}] ${f.name}`),
+				files.map((f) => `[${formatScope(f.scope)}] ${f.name}`),
 			);
 			if (!choice) return false;
 			const parsed = this.parseOption(choice);
@@ -506,7 +530,8 @@ export class PromptService {
 			targetScope = parsed.scope;
 		}
 
-		const content = await this.storage.read(targetFile, targetScope);
+		const resolvedTargetScope = resolveScope(targetScope, this.host);
+		const content = await this.storage.read(targetFile, resolvedTargetScope);
 		if (content === null) {
 			this.ui.notify(`Could not read ${targetFile}`, "error");
 			return false;
@@ -523,13 +548,14 @@ export class PromptService {
 			return false;
 		}
 
-		await this.storage.write(targetFile, updated, targetScope ?? "global");
+		const editScope = resolvedTargetScope;
+		await this.storage.write(targetFile, updated, editScope);
 		await this.updateStatus(sessionId);
 
 		const targetDir =
-			targetScope === "local"
+			editScope === PromptScope.Local
 				? this.storage.getLocalDirectory()
-				: this.storage.getGlobalDirectory();
+				: this.storage.getGlobalDirectory(editScope);
 		const fullPath = path.join(targetDir, targetFile);
 
 		logger.info("PROMPT_EDIT", `Edited ${targetFile}`, { fullPath });
@@ -549,7 +575,7 @@ export class PromptService {
 
 		const choice = await this.ui.select(
 			"Select prompt to delete",
-			files.map((f) => `[${f.scope}] ${f.name}`),
+			files.map((f) => `[${formatScope(f.scope)}] ${f.name}`),
 		);
 		if (!choice) return false;
 
@@ -623,9 +649,10 @@ export class PromptService {
 		const files = await this.storage.list();
 		const options: string[] = [
 			`${NONE_OPTION}  ✓`,
-			CREATE_NEW_GLOBAL_OPTION,
+			CREATE_NEW_OMP_OPTION,
+			CREATE_NEW_PI_OPTION,
 			CREATE_NEW_LOCAL_OPTION,
-			...files.map((f) => `[${f.scope}] ${f.name}`),
+			...files.map((f) => `[${formatScope(f.scope)}] ${f.name}`),
 		];
 
 		const choice = await this.ui.select(
@@ -654,19 +681,24 @@ export class PromptService {
 		}
 
 		const clean = choice.replace(/\s+✓$/, "").trim();
-		if (clean === CREATE_NEW_GLOBAL_OPTION || clean === CREATE_NEW_OPTION) {
-			await this.createNewPrompt(sessionId, "global");
+		if (clean === CREATE_NEW_OMP_OPTION || clean === CREATE_NEW_OPTION) {
+			await this.createNewPrompt(sessionId, PromptScope.GlobalOmp);
+			return;
+		}
+		if (clean === CREATE_NEW_PI_OPTION) {
+			await this.createNewPrompt(sessionId, PromptScope.GlobalPi);
 			return;
 		}
 		if (clean === CREATE_NEW_LOCAL_OPTION) {
-			await this.createNewPrompt(sessionId, "local");
+			await this.createNewPrompt(sessionId, PromptScope.Local);
 			return;
 		}
 
 		const parsed = this.parseOption(choice);
 		const file = parsed.name === NONE_OPTION ? null : parsed.name;
+		const chosenScope = resolveScope(parsed.scope, this.host);
 		const activePrompts: ActivePromptRef[] = file
-			? [{ name: file, scope: parsed.scope ?? "global" }]
+			? [{ name: file, scope: chosenScope }]
 			: [];
 
 		const config: SessionPromptConfig = {
@@ -709,17 +741,18 @@ export class PromptService {
 		} else {
 			for (const p of activeList) {
 				const dir =
-					p.scope === "local"
+					p.scope === PromptScope.Local
 						? this.storage.getLocalDirectory()
-						: this.storage.getGlobalDirectory();
-				lines.push(`  • [${p.scope}] ${path.join(dir, p.name)}`);
+						: this.storage.getGlobalDirectory(p.scope);
+				lines.push(`  • [${formatScope(p.scope)}] ${path.join(dir, p.name)}`);
 			}
 		}
 
 		lines.push("");
 		lines.push("Directories:");
-		lines.push(`  Local:  ${this.storage.getLocalDirectory()}`);
-		lines.push(`  Global: ${this.storage.getGlobalDirectory()}`);
+		lines.push(`  Local: ${this.storage.getLocalDirectory()}`);
+		lines.push(`  OMP:   ${this.storage.getGlobalDirectory(PromptScope.GlobalOmp)}`);
+		lines.push(`  PI:    ${this.storage.getGlobalDirectory(PromptScope.GlobalPi)}`);
 
 		lines.push("");
 		lines.push("All Available Prompts:");
@@ -727,7 +760,7 @@ export class PromptService {
 			lines.push("  (none)");
 		} else {
 			for (const f of files) {
-				lines.push(`  • [${f.scope.padEnd(6)}] ${f.path}`);
+				lines.push(`  • [${formatScope(f.scope).padEnd(5)}] ${f.path}`);
 			}
 		}
 
@@ -752,7 +785,7 @@ export class PromptService {
 		// session state.
 		const extensionContext: CustomPromptChunk = {
 			name: "__system-prompt-switch-context__",
-			scope: "global",
+			scope: globalScopeFor(this.host),
 			content: renderExtensionContext(
 				loadExtensionContextTemplate(),
 				activeList,

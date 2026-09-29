@@ -6,7 +6,8 @@ export interface StoragePort {
 	read(name: string, scope?: PromptScope): Promise<string | null>;
 	write(name: string, content: string, scope?: PromptScope): Promise<void>;
 	delete(name: string, scope?: PromptScope): Promise<boolean>;
-	getGlobalDirectory(): string;
+	/** Global dir for a host scope; defaults to the detected host's dir. */
+	getGlobalDirectory(scope?: PromptScope): string;
 	getLocalDirectory(): string;
 	setCwd(cwd: string): void;
 }
