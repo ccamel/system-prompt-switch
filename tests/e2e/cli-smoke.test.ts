@@ -2,12 +2,11 @@ import { describe, expect, it } from "bun:test";
 
 describe("CLI Smoke Test", () => {
 	it("loads extension cleanly via pi CLI without errors", async () => {
-		// ponytail: spawn whichever host binary is on PATH; omp and pi share the same
-		// extension loader (-e <path>). Default to `pi` for upstream parity.
-		const binary = Bun.which("pi") ? "pi" : "omp";
+		const binary = "./node_modules/.bin/pi";
 		const proc = Bun.spawn(
 			[binary, "-e", "./extensions/index.ts", "--help"],
 			{
+				stdin: "ignore",
 				stdout: "pipe",
 				stderr: "pipe",
 			},
