@@ -647,13 +647,23 @@ export class PromptService {
 		}
 
 		const files = await this.storage.list();
+		// ponytail: never pre-tick an option. A tick on (None / Default) made the
+		// picker answer itself on a fresh session, so the user got a prompt they
+		// had not chosen — and a second default alongside their selection.
 		const options: string[] = [
-			`${NONE_OPTION}  ✓`,
+			NONE_OPTION,
 			CREATE_NEW_OMP_OPTION,
 			CREATE_NEW_PI_OPTION,
 			CREATE_NEW_LOCAL_OPTION,
 			...files.map((f) => `[${formatScope(f.scope)}] ${f.name}`),
 		];
+
+		// ponytail: one log for the whole interaction. The outcome branches below
+		// already record what was chosen, so this only needs to say the dialog ran.
+		logger.info("MODAL_OPEN", "startup prompt modal opened", {
+			sessionId,
+			optionCount: options.length,
+		});
 
 		const choice = await this.ui.select(
 			"System Prompt for this Session",

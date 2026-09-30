@@ -85,7 +85,11 @@ export class SessionStateAdapter implements SessionStatePort {
 	}
 
 	async getSessionConfig(sessionId: string): Promise<SessionPromptConfig | null> {
-		const key = sessionId || "default";
+		// An id the host has not assigned yet means we cannot trust any stored
+		// state. Treating it as "no config" makes the caller start fresh instead
+		// of sharing one bucket across sessions.
+		if (!sessionId) return null;
+		const key = sessionId;
 
 		// 1. In-memory cache
 		if (this.memoryCache.has(key)) {
@@ -133,7 +137,8 @@ export class SessionStateAdapter implements SessionStatePort {
 		sessionId: string,
 		config: SessionPromptConfig,
 	): Promise<void> {
-		const key = sessionId || "default";
+		if (!sessionId) return;
+		const key = sessionId;
 
 		// Update in-memory cache
 		this.memoryCache.set(key, config);

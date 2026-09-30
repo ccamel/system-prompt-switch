@@ -4,6 +4,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { FsStorageAdapter } from "../../src/adapters/fs-storage.adapter";
 import { PromptScope } from "../../src/core/types/prompt-scope.type";
+import { TestPrompt } from "../fixtures/test-prompt.enum";
+import { registerTestPrompt } from "../helpers/test-prompt-registry";
 
 describe("FsStorageAdapter Multi-Scope", () => {
 	let tempDir: string;
@@ -19,15 +21,29 @@ describe("FsStorageAdapter Multi-Scope", () => {
 		fs.mkdirSync(localDir, { recursive: true });
 
 		fs.writeFileSync(
-			path.join(globalDir, "global-coder.md"),
+			path.join(globalDir, TestPrompt.GlobalCoder),
 			"Global coder instructions",
 			"utf-8",
 		);
 		fs.writeFileSync(
-			path.join(localDir, "local-rules.md"),
+			path.join(localDir, TestPrompt.LocalRules),
 			"Local repo instructions",
 			"utf-8",
 		);
+
+		// Register every prompt this suite writes, including the one the adapter
+		// would otherwise drop into the real ~/.omp home.
+		registerTestPrompt(globalDir, TestPrompt.GlobalCoder);
+		registerTestPrompt(localDir, TestPrompt.LocalRules);
+		for (const name of [
+			TestPrompt.Shared,
+			TestPrompt.Duplicate,
+			TestPrompt.Targeted,
+			TestPrompt.Dup,
+			TestPrompt.LeakProbe,
+		]) {
+			registerTestPrompt(globalDir, name);
+		}
 	});
 
 	afterEach(() => {
@@ -35,6 +51,24 @@ describe("FsStorageAdapter Multi-Scope", () => {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		} catch {
 			// ignore cleanup
+		}
+	});
+
+	it("never falls back to the real home prompt dir when a directory is scoped", async () => {
+		const home = process.env.HOME ?? "";
+		const realDirs = [
+			path.join(home, ".omp", "agent", "system-prompts-switch"),
+			path.join(home, ".pi", "agent", "system-prompts-switch"),
+		];
+
+		// Scoping only the legacy globalDir must not let the other host resolve
+		// to the user's real library, which is how test prompts leaked there.
+		const scoped = new FsStorageAdapter({ globalDir, localDir });
+		await scoped.write("leak-probe.md", "must not escape", PromptScope.GlobalOmp);
+		await scoped.write("leak-probe.md", "must not escape", PromptScope.GlobalPi);
+
+		for (const dir of realDirs) {
+			expect(fs.existsSync(path.join(dir, "leak-probe.md"))).toBe(false);
 		}
 	});
 

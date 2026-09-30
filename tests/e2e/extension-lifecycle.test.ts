@@ -3,6 +3,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { ExtensionEventType } from "../../src/core/types/extension-event-type.type";
+import { SessionStartReason } from "../../src/core/types/session-start-reason.type";
 import { ExtensionCommand } from "../../src/core/types/extension-command.type";
 import systemPromptSwitchExtension from "../../extensions/index";
 
@@ -193,13 +195,110 @@ describe("Extension Lifecycle E2E", () => {
 		expect(currentWidget?.[0]).toContain("Active Prompt");
 
 		// Neither must a reload or a fork.
-		for (const reason of ["reload", "fork"] as const) {
+		for (const reason of [
+			SessionStartReason.Reload,
+			SessionStartReason.Fork,
+		] as const) {
 			widgetWritten = Promise.withResolvers<void>();
 			for (const h of sessionStartHandlers) {
-				await h({ type: "session_start", reason }, mockCtx);
+				await h({ type: ExtensionEventType.SessionStart, reason }, mockCtx);
 			}
 			await widgetWritten.promise;
 		}
 		expect(selectCalls).toBe(0);
 	});
+
+	it("asks when session_start carries no reason, as a plain omp launch does", async () => {
+		const eventHandlers = new Map<string, ((e: unknown, c: unknown) => unknown)[]>();
+		const mockPi = {
+			registerCommand() {},
+			registerShortcut() {},
+			on(event: string, handler: (e: unknown, c: unknown) => unknown) {
+				const list = eventHandlers.get(event) ?? [];
+				list.push(handler);
+				eventHandlers.set(event, list);
+			},
+			appendEntry() {},
+		} as unknown as ExtensionAPI;
+
+		systemPromptSwitchExtension(mockPi);
+
+		let selectCalls = 0;
+		// The handler detaches the modal, so wait for the select it triggers
+		// rather than guessing a duration.
+		const asked = Promise.withResolvers<void>();
+		const mockCtx = {
+			hasUI: true,
+			cwd: tempDir,
+			sessionManager: {
+				getSessionId: () => "sess-fresh-user",
+				getEntries: () => [],
+			},
+			ui: {
+				select: async () => {
+					selectCalls++;
+					asked.resolve();
+					return "[omp] test-prompt.md";
+				},
+				notify: () => {},
+				setWidget: () => {},
+			},
+		} as unknown as ExtensionContext;
+
+		// A brand new user launching omp: the host has been observed sending
+		// session_start with no reason at all.
+		for (const h of eventHandlers.get(ExtensionEventType.SessionStart)!) {
+			await h({ type: ExtensionEventType.SessionStart }, mockCtx);
+		}
+
+		await asked.promise;
+		expect(selectCalls).toBe(1);
+	});
+
+	it("does not ask on a startup reason either", async () => {
+		const eventHandlers = new Map<string, ((e: unknown, c: unknown) => unknown)[]>();
+		const mockPi = {
+			registerCommand() {},
+			registerShortcut() {},
+			on(event: string, handler: (e: unknown, c: unknown) => unknown) {
+				const list = eventHandlers.get(event) ?? [];
+				list.push(handler);
+				eventHandlers.set(event, list);
+			},
+			appendEntry() {},
+		} as unknown as ExtensionAPI;
+
+		systemPromptSwitchExtension(mockPi);
+
+		let selectCalls = 0;
+		const asked = Promise.withResolvers<void>();
+		const mockCtx = {
+			hasUI: true,
+			cwd: tempDir,
+			sessionManager: {
+				getSessionId: () => "sess-startup",
+				getEntries: () => [],
+			},
+			ui: {
+				select: async () => {
+					selectCalls++;
+					asked.resolve();
+					return undefined;
+				},
+				notify: () => {},
+				setWidget: () => {},
+			},
+		} as unknown as ExtensionContext;
+
+		for (const h of eventHandlers.get(ExtensionEventType.SessionStart)!) {
+			await h(
+				{ type: ExtensionEventType.SessionStart, reason: SessionStartReason.Startup },
+				mockCtx,
+			);
+		}
+
+		await asked.promise;
+		expect(selectCalls).toBe(1);
+	});
+
 });

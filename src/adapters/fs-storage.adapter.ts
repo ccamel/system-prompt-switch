@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { resolveHostPaths } from "../core/paths";
-import type { HostPlatform } from "../core/types/host-platform.type";
+import { HostPlatform } from "../core/types/host-platform.type";
 import type { PromptFileInfo } from "../core/types/prompt-file-info.type";
 import { globalScopeFor, PromptScope } from "../core/types/prompt-scope.type";
 import type { StoragePort } from "../ports/storage.port";
@@ -24,18 +24,37 @@ export class FsStorageAdapter implements StoragePort {
 	constructor(options?: FsStorageOptions) {
 		const resolved = resolveHostPaths(options?.cwd);
 		this.detectedHost = resolved.host;
-		this.ompGlobalDir = options?.ompGlobalDir ?? resolved.ompGlobalPromptDir;
-		this.piGlobalDir = options?.piGlobalDir ?? resolved.piGlobalPromptDir;
-		// Legacy `globalDir` option maps onto the detected host so existing
-		// callers and tests keep working.
-		if (options?.globalDir !== undefined) {
-			if (resolved.host === "omp") {
-				this.ompGlobalDir = options.globalDir;
-			} else {
-				this.piGlobalDir = options.globalDir;
-			}
-		}
 		this.localDir = options?.localDir ?? resolved.localPromptDir;
+
+		// ponytail: a caller that scopes any directory must never leave the other
+		// host resolving to the real ~/.omp or ~/.pi prompt dir — that is how test
+		// prompts reached a user's library. Unset hosts get a private temp dir.
+		const unset = (host: HostPlatform) =>
+			fs.mkdtempSync(path.join(os.tmpdir(), `sps-unset-${host}-`));
+
+		const scoped =
+			options?.ompGlobalDir !== undefined ||
+			options?.piGlobalDir !== undefined ||
+			options?.globalDir !== undefined ||
+			options?.localDir !== undefined;
+
+		// Legacy `globalDir` maps onto the detected host only, so the other host
+		// stays empty and list() cannot report the same file twice.
+		this.ompGlobalDir =
+			options?.ompGlobalDir ??
+			(options?.globalDir !== undefined && resolved.host === HostPlatform.Omp
+				? options.globalDir
+				: scoped
+					? unset(HostPlatform.Omp)
+					: resolved.ompGlobalPromptDir);
+
+		this.piGlobalDir =
+			options?.piGlobalDir ??
+			(options?.globalDir !== undefined && resolved.host === HostPlatform.Pi
+				? options.globalDir
+				: scoped
+					? unset(HostPlatform.Pi)
+					: resolved.piGlobalPromptDir);
 	}
 
 	setCwd(cwd: string): void {

@@ -3,6 +3,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { FsStorageAdapter } from "../../src/adapters/fs-storage.adapter";
+import { TestPrompt } from "../fixtures/test-prompt.enum";
+import { registerTestPrompt } from "../helpers/test-prompt-registry";
 import { SessionStateAdapter } from "../../src/adapters/session-state.adapter";
 import { PromptService } from "../../src/core/prompt-service";
 import type { UIPort } from "../../src/ports/ui.port";
@@ -39,15 +41,18 @@ describe("Session Isolation", () => {
 
 		fs.mkdirSync(promptsDir, { recursive: true });
 		fs.writeFileSync(
-			path.join(promptsDir, "SPR1.md"),
+			path.join(promptsDir, TestPrompt.Spr1),
 			"You are Persona 1.",
 			"utf-8",
 		);
 		fs.writeFileSync(
-			path.join(promptsDir, "SPR2.md"),
+			path.join(promptsDir, TestPrompt.Spr2),
 			"You are Persona 2.",
 			"utf-8",
 		);
+
+		registerTestPrompt(promptsDir, TestPrompt.Spr1);
+		registerTestPrompt(promptsDir, TestPrompt.Spr2);
 	});
 
 	afterEach(() => {

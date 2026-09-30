@@ -58,6 +58,26 @@ omp plugin link .
 pi install ./              # for Pi
 ```
 
+### Deleting a profile
+
+A profile is a self-contained directory under `~/.omp/profiles/<name>/` holding that profile's `agent/` (sessions + state), `cache/`, `logs/`, and `run/`. There is no `omp --delete-profile` flag; remove the directory.
+
+```bash
+# List profiles
+ls ~/.omp/profiles/
+
+# Inspect before deleting
+du -sh ~/.omp/profiles/test
+ls ~/.omp/profiles/test
+
+# Delete
+rm -rf ~/.omp/profiles/test
+```
+
+This only touches `~/.omp/profiles/<name>/`. Your default profile (top-level `~/.omp/agent/`, `plugins/`, `cache/`, `logs/`) is separate and is **not** affected, so installed plugins and real sessions survive.
+
+If you created a shell shortcut with `omp --profile <name> --alias <cmd>`, that alias points at the profile too — remove it from `~/.local/bin/` and any rc file that references it.
+
 ---
 
 ## Editor shortcut caveat

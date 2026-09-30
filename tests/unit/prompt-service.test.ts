@@ -110,6 +110,7 @@ class MockUI implements UIPort {
 	selectChoice: string | undefined;
 	selectChoices: string[] = [];
 	selectCalls = 0;
+	offeredOptions: string[][] = [];
 	inputValue: string | undefined;
 	inputValues: string[] = [];
 	editorValue: string | undefined;
@@ -122,8 +123,9 @@ class MockUI implements UIPort {
 	hasUI(): boolean {
 		return this.hasUIValue;
 	}
-	async select(): Promise<string | undefined> {
+	async select(_title?: string, options?: string[]): Promise<string | undefined> {
 		this.selectCalls++;
+		if (options) this.offeredOptions.push(options);
 		return this.selectChoices.shift() ?? this.selectChoice;
 	}
 
@@ -575,6 +577,19 @@ describe("PromptService", () => {
 		expect(result).toContain("System Prompt Switch");
 		expect(result).toContain("[omp] beh.md");
 		expect(result).toContain("BEH content");
+	});
+
+	it("pre-ticks nothing in the startup modal on a fresh session", async () => {
+		storage.files.set("beh.md", "BEH content");
+		ui.selectChoices = [];
+
+		await service.promptNewSessionModal("sess-fresh-modal");
+
+		const offered = ui.offeredOptions.at(-1) ?? [];
+		// No entry may arrive pre-selected: the user has not chosen yet, and a
+		// tick on (None / Default) made the modal answer itself.
+		expect(offered.length).toBeGreaterThan(0);
+		expect(offered.some((o) => o.includes("✓"))).toBe(false);
 	});
 
 	it("defaults to None and clears widget when startup modal is dismissed", async () => {

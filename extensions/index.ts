@@ -15,9 +15,11 @@ import { logger } from "../src/core/logger";
 import type { ActivePromptRef } from "../src/core/types/active-prompt-ref.type";
 import { PromptScope } from "../src/core/types/prompt-scope.type";
 import {
-	ExtensionCommand,
 	EXTENSION_COMMAND_CATALOG,
+	ExtensionCommand,
 } from "../src/core/types/extension-command.type";
+import { ExtensionEventType } from "../src/core/types/extension-event-type.type";
+import { SKIPPED_SESSION_REASONS } from "../src/core/types/session-start-reason.type";
 import type { MergeMode } from "../src/core/types/merge-mode.type";
 
 export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
@@ -35,7 +37,11 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 		uiAdapter.setHost(ctx);
 		storage.setCwd(ctx.cwd);
 		sessionState.setEntryProvider(ctx.sessionManager);
-		return ctx.sessionManager.getSessionId() || "default";
+		// ponytail: never invent an id. Collapsing an empty session id onto a shared
+		// "default" key made one session's decision leak into the next. An empty id
+		// is passed through so session state reads nothing. Logged once, by
+		// SESSION_START, rather than on every command.
+		return ctx.sessionManager.getSessionId() ?? "";
 	}
 
 	// --- Commands ---
@@ -174,25 +180,31 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 
 	// --- Lifecycle Hooks ---
 
-	pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
+	pi.on(ExtensionEventType.SessionStart, (event: SessionStartEvent, ctx: ExtensionContext) => {
 		const sessionId = bindHost(ctx);
+
+		// ponytail: decide by the reasons that SUPPRESS the prompt, never by
+		// matching one that shows it. Anything else - including an absent reason -
+		// is a session we should ask about.
+		const skipped = SKIPPED_SESSION_REASONS.has(event.reason as string);
 		logger.info("SESSION_START", "session_start event received", {
-			reason: event.reason,
+			// reason is optional: a plain launch has been observed sending none, so
+			// never rely on it being populated.
+			reason: event.reason ?? "(none)",
 			sessionId,
+			hasUI: ctx.hasUI,
+			decision: skipped ? "refresh only" : "ask for prompt",
 		});
-		// ponytail: only ask on a genuinely fresh session. Treating a missing
-		// reason as "new" made every resume re-ask; resume/reload/fork just
-		// refresh the widget, and the service's `decided` flag makes a second
-		// startup on the same session silent too.
-		if (event.reason === "startup" || event.reason === "new") {
-			// Detach modal from event watchdog so user dialogs have unlimited time
-			void service.promptNewSessionModal(sessionId);
-		} else {
+
+		if (skipped) {
 			void service.updateStatus(sessionId);
+			return;
 		}
+		// Detach modal from event watchdog so user dialogs have unlimited time.
+		void service.promptNewSessionModal(sessionId);
 	});
 
-	pi.on("session_shutdown", (_event, ctx: ExtensionContext) => {
+	pi.on(ExtensionEventType.SessionShutdown, (_event, ctx: ExtensionContext) => {
 		logger.info("SESSION_SHUTDOWN", "session_shutdown event received");
 		if (ctx.hasUI) {
 			uiAdapter.setHost(ctx);
@@ -203,7 +215,7 @@ export default function systemPromptSwitchExtension(pi: ExtensionAPI): void {
 	// --- System Prompt Injection ---
 
 	pi.on(
-		"before_agent_start",
+		ExtensionEventType.BeforeAgentStart,
 		async (
 			event: BeforeAgentStartEvent,
 			ctx: ExtensionContext,

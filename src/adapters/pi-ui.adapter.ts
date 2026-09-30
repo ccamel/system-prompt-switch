@@ -1,3 +1,4 @@
+import { logger } from "../core/logger";
 import type { UIPort } from "../ports/ui.port";
 
 export interface PiUIHost {
@@ -30,8 +31,25 @@ export class PiUIAdapter implements UIPort {
 	}
 
 	async select(title: string, options: string[]): Promise<string | undefined> {
-		if (!this.host?.hasUI) return undefined;
-		return this.host.ui.select(title, options);
+		// ponytail: log only the anomalies. The happy path is already covered by
+		// MODAL_OPEN / MODAL_ANSWER in the service, and a per-call log here would
+		// duplicate it for every dialog the extension opens.
+		if (!this.host?.hasUI) {
+			logger.warn("UI_UNAVAILABLE", "dialog requested with no UI host", {
+				title,
+			});
+			return undefined;
+		}
+		try {
+			return await this.host.ui.select(title, options);
+		} catch (err) {
+			logger.error(
+				"UI_DIALOG_THREW",
+				"host ui.select threw",
+				{ title, error: err instanceof Error ? err.message : String(err) },
+			);
+			throw err;
+		}
 	}
 
 	async input(title: string, placeholder?: string): Promise<string | undefined> {
