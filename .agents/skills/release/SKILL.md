@@ -1,3 +1,8 @@
+---
+name: release
+description: Use when you are ready to ship a version - pre-flight checks, bump, commit, tag, push, publish to npm, and verify on the registry and the Pi gallery. Manual checklist only; no script is shipped and nothing runs unless you type it.
+---
+
 # release
 
 Step-by-step release playbook for the `system-prompt-switch` package: bump the version, tag the commit, publish to npm, verify on https://pi.dev/packages. No script is shipped — this skill is the manual checklist. Every command is shown so the human stays in control; nothing runs unless typed.
@@ -32,6 +37,8 @@ npm view system-prompt-switch version
 # Expected: a 0.x version older than what you're about to ship.
 
 # Optional: re-run the local test suite + typecheck + lint one last time.
+bun run ci            # full pipeline, mirrors CI
+# Or individually:
 bun test
 bun run typecheck
 bun run lint

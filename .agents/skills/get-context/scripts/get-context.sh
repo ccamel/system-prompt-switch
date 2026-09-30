@@ -63,8 +63,14 @@ if [ -d "${SKILLS_DIR}" ]; then
       skill_name=$(basename "${skill}")
       desc="No description"
       if [ -f "${skill}/SKILL.md" ]; then
-        first_line=$(grep -v '^#' "${skill}/SKILL.md" | grep -v '^$' | head -n 1 || echo "")
-        [ -n "${first_line}" ] && desc="${first_line}"
+        # Prefer the frontmatter description; fall back to the first prose line
+        # for skills written before frontmatter was required.
+        desc=$(sed -n 's/^description:[[:space:]]*//p' "${skill}/SKILL.md" | head -n 1)
+        if [ -z "${desc}" ]; then
+          desc=$(sed -n '/^---$/,/^---$/!p' "${skill}/SKILL.md" \
+            | grep -v '^#' | grep -v '^$' | head -n 1 || echo "")
+        fi
+        [ -n "${desc}" ] || desc="No description"
       fi
       echo "  • ${skill_name}: ${desc}"
     fi

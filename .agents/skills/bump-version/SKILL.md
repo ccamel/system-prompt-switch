@@ -1,3 +1,8 @@
+---
+name: bump-version
+description: Use when you need to bump the package version in package.json or create an annotated git tag at HEAD. Bumping edits the file only - it does not commit or tag, and --tag is a separate step, so a human stays in control of commits and pushes.
+---
+
 # bump-version
 
 Show the current package version and, on request, bump it in `package.json` (no commit, no tag) or create an annotated git tag at the current HEAD. Designed for a workflow where the human commits and pushes manually.

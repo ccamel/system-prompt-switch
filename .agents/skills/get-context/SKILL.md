@@ -1,3 +1,8 @@
+---
+name: get-context
+description: Use when you need an immediate overview of this plugin - active technologies, npm/bun scripts, extension commands, directory layout, and the available project skills.
+---
+
 # get-context
 
 Provides a complete summary of the `system-prompt-switch` plugin context, including active technologies, npm/bun scripts, extension commands, directory layout, and available skills.

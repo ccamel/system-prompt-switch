@@ -1,6 +1,6 @@
 {
   "name": "system-prompt-switch",
-  "version": "0.9.8",
+  "version": "0.9.9",
   "description": "Pi extension to manage custom system prompts per session with switch, modal selection, and CRUD commands",
   "type": "module",
   "main": "extensions/index.ts",
@@ -19,7 +19,9 @@
   "scripts": {
     "test": "bun test",
     "lint": "oxlint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "validate:skills": "bash .agents/skills/ci-check/scripts/validate-skills.sh",
+    "ci": "bun run lint && bun run typecheck && bun test && bun run validate:skills"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

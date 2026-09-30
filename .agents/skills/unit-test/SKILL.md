@@ -1,3 +1,8 @@
+---
+name: unit-test
+description: Use when writing or changing a test in this repo - TDD order, port-based mocks, the TestPrompt enum and registry that stop tests leaking prompts into the real library, awaiting async signals instead of sleeping, and enum usage.
+---
+
 # unit-test
 
 How to add tests to this repo. Read this before writing or changing a test — the conventions here are specific and several of them prevent real damage to the user's prompt library.
@@ -166,6 +171,8 @@ A raw string still compiles in a test fixture, which is exactly how a legacy `"g
 bun run typecheck   # must be clean
 bun run lint        # must be clean
 ```
+
+Run `bun run ci` before declaring work done — it is the full pipeline, including skill validation. See the `ci-check` skill.
 
 ## Debugging a flaky or unclear failure
 
